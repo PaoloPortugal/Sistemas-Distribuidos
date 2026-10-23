@@ -11,7 +11,7 @@ Proyecto de Sistemas Distribuidos — Universidad de Montevideo.
 | Catálogo de médicos | FastAPI | interno 8002 |
 | Reservas | FastAPI | interno 8003 |
 | Notificaciones (worker) | Python + aio-pika | interno 8004 |
-| Base de datos | PostgreSQL 16 (un esquema por servicio) | 5432 |
+| Base de datos | PostgreSQL 16 (un esquema por servicio) | 5433 (`PUERTO_POSTGRES`) |
 | Mensajería | RabbitMQ (exchange `turnos`) | panel: 15672 |
 | Correo (desarrollo) | Mailpit | 8025 |
 
