@@ -1,0 +1,107 @@
+services:
+  gateway:
+    image: traefik:v3.1
+    command: --configFile=/etc/traefik/traefik.yml
+    ports:
+      - "${PUERTO_GATEWAY:-8080}:80"
+      - "8081:8080"
+    volumes:
+      - ./gateway/traefik.yml:/etc/traefik/traefik.yml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
+  frontend:
+    image: nginx:1.27-alpine
+    volumes:
+      - ./frontend:/usr/share/nginx/html:ro
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.frontend.rule=PathPrefix(`/`)"
+      - "traefik.http.routers.frontend.priority=1"
+
+  postgres:
+    image: postgres:16
+    env_file: .env
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - datos_postgres:/var/lib/postgresql/data
+      - ./infra/postgres/init:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "5432:5432"
+
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USUARIO}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_CONTRASENA}
+    ports:
+      - "15672:15672"
+
+  mailpit:
+    image: axllent/mailpit:latest
+    ports:
+      - "8025:8025"
+
+  usuarios:
+    build: ./servicios/usuarios
+    env_file: .env
+    environment:
+      NOMBRE_SERVICIO: usuarios
+      URL_BASE_DATOS: postgresql+psycopg://${USUARIOS_DB_USUARIO}:${USUARIOS_DB_CONTRASENA}@postgres:5432/${POSTGRES_DB}
+    depends_on:
+      - postgres
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.usuarios.rule=PathPrefix(`/api/usuarios`)"
+      - "traefik.http.middlewares.usuarios-prefijo.stripprefix.prefixes=/api/usuarios"
+      - "traefik.http.routers.usuarios.middlewares=usuarios-prefijo"
+      - "traefik.http.services.usuarios.loadbalancer.server.port=8001"
+
+  catalogo-medicos:
+    build: ./servicios/catalogo_medicos
+    env_file: .env
+    environment:
+      NOMBRE_SERVICIO: catalogo_medicos
+      URL_BASE_DATOS: postgresql+psycopg://${CATALOGO_MEDICOS_DB_USUARIO}:${CATALOGO_MEDICOS_DB_CONTRASENA}@postgres:5432/${POSTGRES_DB}
+    depends_on:
+      - postgres
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.catalogo-medicos.rule=PathPrefix(`/api/catalogo-medicos`)"
+      - "traefik.http.middlewares.catalogo-medicos-prefijo.stripprefix.prefixes=/api/catalogo-medicos"
+      - "traefik.http.routers.catalogo-medicos.middlewares=catalogo-medicos-prefijo"
+      - "traefik.http.services.catalogo-medicos.loadbalancer.server.port=8002"
+
+  reservas:
+    build: ./servicios/reservas
+    env_file: .env
+    environment:
+      NOMBRE_SERVICIO: reservas
+      URL_BASE_DATOS: postgresql+psycopg://${RESERVAS_DB_USUARIO}:${RESERVAS_DB_CONTRASENA}@postgres:5432/${POSTGRES_DB}
+      URL_RABBITMQ: amqp://${RABBITMQ_USUARIO}:${RABBITMQ_CONTRASENA}@rabbitmq:5672/
+      URL_CATALOGO: http://catalogo-medicos:8002
+    depends_on:
+      - postgres
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.reservas.rule=PathPrefix(`/api/reservas`)"
+      - "traefik.http.middlewares.reservas-prefijo.stripprefix.prefixes=/api/reservas"
+      - "traefik.http.routers.reservas.middlewares=reservas-prefijo"
+      - "traefik.http.services.reservas.loadbalancer.server.port=8003"
+
+  notificaciones:
+    build: ./servicios/notificaciones
+    env_file: .env
+    environment:
+      NOMBRE_SERVICIO: notificaciones
+      URL_BASE_DATOS: postgresql+psycopg://${NOTIFICACIONES_DB_USUARIO}:${NOTIFICACIONES_DB_CONTRASENA}@postgres:5432/${POSTGRES_DB}
+      URL_RABBITMQ: amqp://${RABBITMQ_USUARIO}:${RABBITMQ_CONTRASENA}@rabbitmq:5672/
+      SMTP_HOST: mailpit
+      SMTP_PUERTO: "1025"
+    depends_on:
+      - rabbitmq
+
+volumes:
+  datos_postgres:

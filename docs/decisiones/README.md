@@ -1,0 +1,3 @@
+# Registro de decisiones de arquitectura (ADR)
+
+Un archivo por decisión: `001-mensajeria.md`, `002-base-de-datos.md`, ...

@@ -1,0 +1,9 @@
+fastapi
+uvicorn[standard]
+pydantic-settings
+sqlalchemy
+psycopg[binary]
+alembic
+structlog
+pyjwt[crypto]
+aio-pika
