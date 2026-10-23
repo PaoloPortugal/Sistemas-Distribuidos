@@ -58,7 +58,7 @@ services:
 
   usuarios:
     build: ./servicios/usuarios
-    env_file: .env
+    # Sin env_file: el contenedor recibe solo sus propias variables.
     environment:
       NOMBRE_SERVICIO: usuarios
       URL_BASE_DATOS: postgresql+psycopg://${USUARIOS_DB_USUARIO}:${USUARIOS_DB_CONTRASENA}@postgres:5432/${POSTGRES_DB}
