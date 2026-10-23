@@ -1,5 +1,9 @@
 # Instrucciones para agentes de IA
-
+## Fuentes de verdad
+- Modelo relacional y restricciones: @docs/06-persistencia.md
+- MER: docs/diagramas/MER_turnos_clinica_v2.drawio.png
+- Arquitectura: docs/diagramas/Arquitectura_turnos_clinica.drawio.png
+Todo cambio debe ser coherente con estas fuentes. Si algo no coincide, avisar antes de implementar.
 ## Contexto
 Sistema distribuido de gestión de turnos médicos (proyecto académico).
 Stack: Python 3.12 + FastAPI, PostgreSQL, RabbitMQ, Traefik, Docker Compose, pytest.
