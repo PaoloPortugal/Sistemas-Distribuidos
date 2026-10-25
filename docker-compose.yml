@@ -84,11 +84,12 @@ services:
 
   catalogo-medicos:
     build: ./servicios/catalogo_medicos
-    env_file: .env
+    # Sin env_file: el contenedor recibe solo sus propias variables.
     environment:
       NOMBRE_SERVICIO: catalogo_medicos
       URL_BASE_DATOS: postgresql+psycopg://${CATALOGO_MEDICOS_DB_USUARIO}:${CATALOGO_MEDICOS_DB_CONTRASENA}@postgres:5432/${POSTGRES_DB}
       UVICORN_ROOT_PATH: /api/catalogo-medicos
+      RUTA_CLAVE_PUBLICA_JWT: /run/secrets/jwt_publica.pem
     secrets:
       - source: jwt_publica
         target: jwt_publica.pem

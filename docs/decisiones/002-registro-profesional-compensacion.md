@@ -1,7 +1,7 @@
 # 002 — Registro de profesional con compensación
 
-**Estado:** aceptada. El endpoint de catálogo (`/interno/profesionales`) está
-pendiente; hasta que exista, `/registro/profesional` responde 503 y no crea nada.
+**Estado:** aceptada e implementada en los dos servicios (`usuarios` y
+`catalogo_medicos`, endpoint `/interno/profesionales`).
 
 ## Contexto
 
