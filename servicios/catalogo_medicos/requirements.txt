@@ -6,3 +6,4 @@ psycopg[binary]
 alembic
 structlog
 pyjwt[crypto]
+email-validator

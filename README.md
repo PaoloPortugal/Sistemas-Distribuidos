@@ -27,6 +27,27 @@ docker compose up --build
 - APIs: http://localhost:8080/api/usuarios, /api/catalogo-medicos, /api/reservas
 - Swagger de cada servicio: `/api/<servicio>/docs`
 
+### Extensiones de PostgreSQL
+
+`catalogo_medicos` necesita la extensión `btree_gist` para impedir
+disponibilidades superpuestas. Los usuarios de los servicios no pueden crearla,
+así que la crea `infra/postgres/init/02-extensiones.sh` como superusuario.
+
+Ese script solo corre al inicializar un volumen vacío. Si tu base ya estaba
+inicializada, la migración de catálogo falla avisando que falta la extensión.
+Hay dos caminos:
+
+```bash
+# Crearla a mano (no borra datos)
+docker compose exec postgres psql -U postgres -d turnos -c "CREATE EXTENSION IF NOT EXISTS btree_gist"
+
+# o recrear la base desde cero (borra todos los datos)
+docker compose down -v
+```
+
+Si cambiaste `POSTGRES_USER` o `POSTGRES_DB` en `.env`, usá esos valores en
+lugar de `postgres` y `turnos`.
+
 ### Claves JWT de desarrollo
 
 El servicio `usuarios` firma los tokens con RS256: firma con una clave privada

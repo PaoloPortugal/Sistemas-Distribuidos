@@ -44,6 +44,12 @@ URL (`@` → `%40`).
 | Respuesta | Cuándo |
 | --- | --- |
 | `204 No Content` | Se borró, **o no existía** (idempotente). |
+| `409` `PROFESIONAL_CON_DISPONIBILIDADES` | El profesional tiene disponibilidades: la FK `DISPONIBILIDAD.email_profesional` es `ON DELETE RESTRICT` y no se borra nada. |
+
+En la compensación el 409 no debería ocurrir: el profesional se creó segundos
+antes y todavía no tiene USUARIO confirmado para iniciar sesión y cargar
+disponibilidades. Si ocurriera, `usuarios` lo trata como cualquier respuesta
+distinta de 204: registra "Inconsistencia" en el log y responde 503 al cliente.
 
 ### Cómo interpreta `usuarios` las respuestas
 
