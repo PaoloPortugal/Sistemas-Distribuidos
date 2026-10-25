@@ -7,3 +7,5 @@ alembic
 structlog
 pyjwt[crypto]
 argon2-cffi
+email-validator
+httpx

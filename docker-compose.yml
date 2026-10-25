@@ -63,6 +63,15 @@ services:
       NOMBRE_SERVICIO: usuarios
       URL_BASE_DATOS: postgresql+psycopg://${USUARIOS_DB_USUARIO}:${USUARIOS_DB_CONTRASENA}@postgres:5432/${POSTGRES_DB}
       UVICORN_ROOT_PATH: /api/usuarios
+      RUTA_CLAVE_PRIVADA_JWT: /run/secrets/jwt_privada.pem
+      RUTA_CLAVE_PUBLICA_JWT: /run/secrets/jwt_publica.pem
+      URL_CATALOGO: http://catalogo-medicos:8002
+    # Único servicio con la clave privada: es el que firma los tokens.
+    secrets:
+      - source: jwt_privada
+        target: jwt_privada.pem
+      - source: jwt_publica
+        target: jwt_publica.pem
     depends_on:
       postgres:
         condition: service_healthy
@@ -80,12 +89,16 @@ services:
       NOMBRE_SERVICIO: catalogo_medicos
       URL_BASE_DATOS: postgresql+psycopg://${CATALOGO_MEDICOS_DB_USUARIO}:${CATALOGO_MEDICOS_DB_CONTRASENA}@postgres:5432/${POSTGRES_DB}
       UVICORN_ROOT_PATH: /api/catalogo-medicos
+    secrets:
+      - source: jwt_publica
+        target: jwt_publica.pem
     depends_on:
       postgres:
         condition: service_healthy
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.catalogo-medicos.rule=PathPrefix(`/api/catalogo-medicos`)"
+      # /interno es solo para otros servicios (red interna): Traefik no lo publica.
+      - "traefik.http.routers.catalogo-medicos.rule=PathPrefix(`/api/catalogo-medicos`) && !PathPrefix(`/api/catalogo-medicos/interno`)"
       - "traefik.http.middlewares.catalogo-medicos-prefijo.stripprefix.prefixes=/api/catalogo-medicos"
       - "traefik.http.routers.catalogo-medicos.middlewares=catalogo-medicos-prefijo"
       - "traefik.http.services.catalogo-medicos.loadbalancer.server.port=8002"
@@ -99,6 +112,9 @@ services:
       URL_RABBITMQ: amqp://${RABBITMQ_USUARIO}:${RABBITMQ_CONTRASENA}@rabbitmq:5672/
       URL_CATALOGO: http://catalogo-medicos:8002
       UVICORN_ROOT_PATH: /api/reservas
+    secrets:
+      - source: jwt_publica
+        target: jwt_publica.pem
     depends_on:
       postgres:
         condition: service_healthy
@@ -126,3 +142,11 @@ services:
 
 volumes:
   datos_postgres:
+
+# Claves JWT de desarrollo: se generan con infra/claves/generar_claves.sh
+# y no se suben al repositorio.
+secrets:
+  jwt_privada:
+    file: ./secretos/jwt_privada.pem
+  jwt_publica:
+    file: ./secretos/jwt_publica.pem
