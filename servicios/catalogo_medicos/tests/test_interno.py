@@ -37,6 +37,31 @@ def test_crear_dos_veces_con_los_mismos_datos_responde_200(cliente, fabrica_sesi
     assert len(profesionales_en_base(fabrica_sesiones)) == 1
 
 
+def test_reintento_con_otro_nombre_actualiza_la_copia(cliente, fabrica_sesiones):
+    """Nombre y apellido son una copia para mostrar (ADR 004): no son conflicto."""
+    cliente.post("/interno/profesionales", json=datos_profesional())
+
+    respuesta = cliente.post(
+        "/interno/profesionales", json=datos_profesional(nombre="Bruno José")
+    )
+
+    assert respuesta.status_code == 200
+    assert respuesta.json()["nombre"] == "Bruno José"
+    with fabrica_sesiones() as sesion:
+        assert sesion.get(Profesional, "dr.gomez@ejemplo.com").nombre == "Bruno José"
+
+
+@pytest.mark.parametrize("campo", ["nombre", "apellido"])
+def test_crear_sin_nombre_o_apellido_responde_422(cliente, fabrica_sesiones, campo):
+    datos = datos_profesional()
+    del datos[campo]
+
+    respuesta = cliente.post("/interno/profesionales", json=datos)
+
+    assert respuesta.status_code == 422
+    assert profesionales_en_base(fabrica_sesiones) == []
+
+
 def test_crear_normaliza_el_email(cliente, fabrica_sesiones):
     respuesta = cliente.post(
         "/interno/profesionales", json=datos_profesional(email="Dr.Gomez@Ejemplo.COM")

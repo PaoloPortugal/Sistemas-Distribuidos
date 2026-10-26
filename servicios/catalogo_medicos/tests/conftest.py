@@ -1,20 +1,94 @@
-"""Fixtures comunes: base SQLite en memoria en lugar de PostgreSQL.
+"""Fixtures comunes: base SQLite en memoria en lugar de PostgreSQL, claves JWT
+temporales y un reloj fijo.
 
 SQLite no tiene el EXCLUDE de disponibilidad (se declara solo para
-PostgreSQL); la superposición se verifica contra PostgreSQL con Docker.
+PostgreSQL); un trigger lo imita para poder probar el 409. El comportamiento
+real se verifica contra PostgreSQL con Docker.
 """
 
+import datetime
 from collections.abc import Iterator
 
+import jwt
 import pytest
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi.testclient import TestClient
-from sqlalchemy import Engine, create_engine, event
+from sqlalchemy import Engine, create_engine, event, text
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.db.modelos import ESQUEMA, Base, Especialidad
+from app.config import configuracion
+from app.db.modelos import ESQUEMA, Base, Especialidad, Profesional, Servicio
 from app.db.sesion import obtener_sesion
+from app.dominio import reloj, tokens
 from app.main import app
+
+# Lunes 2 de noviembre de 2026, 10:00 en la zona de la clínica.
+AHORA = datetime.datetime(2026, 11, 2, 10, 0)
+
+TRIGGER_SIN_SUPERPOSICION = """
+CREATE TRIGGER sin_superposicion BEFORE INSERT ON disponibilidad
+WHEN EXISTS (
+    SELECT 1 FROM disponibilidad d
+    WHERE d.email_profesional = NEW.email_profesional
+      AND d.fecha = NEW.fecha
+      AND d.horario_inicio < NEW.horario_fin
+      AND d.horario_fin > NEW.horario_inicio
+)
+BEGIN
+    SELECT RAISE(ABORT, 'ex_disponibilidad_sin_superposicion');
+END
+"""
+
+
+def generar_par_claves() -> tuple[bytes, bytes]:
+    privada = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    pem_privada = privada.private_bytes(
+        serialization.Encoding.PEM,
+        serialization.PrivateFormat.PKCS8,
+        serialization.NoEncryption(),
+    )
+    pem_publica = privada.public_key().public_bytes(
+        serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo
+    )
+    return pem_privada, pem_publica
+
+
+@pytest.fixture(scope="session")
+def claves(tmp_path_factory) -> tuple[bytes, str]:
+    """Clave privada (para firmar tokens como lo haría usuarios) y ruta de la pública."""
+    pem_privada, pem_publica = generar_par_claves()
+    publica = tmp_path_factory.mktemp("claves") / "jwt_publica.pem"
+    publica.write_bytes(pem_publica)
+    return pem_privada, str(publica)
+
+
+@pytest.fixture(autouse=True)
+def clave_publica_de_prueba(claves, monkeypatch) -> Iterator[None]:
+    monkeypatch.setattr(configuracion, "ruta_clave_publica_jwt", claves[1])
+    tokens.olvidar_claves()
+    yield
+    tokens.olvidar_claves()
+
+
+@pytest.fixture
+def emitir(claves):
+    """Firma un token como lo haría usuarios: emitir(email, tipo) -> encabezados."""
+
+    def _emitir(email: str, tipo: str, *, clave: bytes | None = None, **cambios) -> dict:
+        emitido = datetime.datetime.now(datetime.UTC)
+        claims = {
+            "sub": email,
+            "tipo": tipo,
+            "iss": "usuarios",
+            "iat": emitido,
+            "exp": emitido + datetime.timedelta(minutes=60),
+        } | cambios
+        token = jwt.encode(claims, clave or claves[0], algorithm="RS256")
+        return {"Authorization": f"Bearer {token}"}
+
+    return _emitir
 
 
 @pytest.fixture
@@ -32,6 +106,8 @@ def motor() -> Iterator[Engine]:
         conexion_dbapi.execute("PRAGMA foreign_keys = ON")
 
     Base.metadata.create_all(motor)
+    with motor.begin() as conexion:
+        conexion.execute(text(TRIGGER_SIN_SUPERPOSICION))
     yield motor
     motor.dispose()
 
@@ -42,8 +118,12 @@ def fabrica_sesiones(motor) -> sessionmaker[Session]:
     with fabrica() as sesion:
         sesion.add_all(
             [
-                Especialidad(id_especialidad=1, nombre="Clínica médica"),
+                Especialidad(id_especialidad=1, nombre="Clínica médica", descripcion="Adultos"),
                 Especialidad(id_especialidad=2, nombre="Pediatría"),
+                Especialidad(id_especialidad=3, nombre="Dermatología"),
+                Servicio(nombre="Consulta general", id_especialidad=1),
+                Servicio(nombre="Control preventivo", id_especialidad=1),
+                Servicio(nombre="Control del niño sano", id_especialidad=2),
             ]
         )
         sesion.commit()
@@ -57,11 +137,35 @@ def cliente(fabrica_sesiones) -> Iterator[TestClient]:
             yield sesion
 
     app.dependency_overrides[obtener_sesion] = sesion_de_prueba
+    app.dependency_overrides[reloj.ahora] = lambda: AHORA
     with TestClient(app) as cliente:
         yield cliente
     app.dependency_overrides.clear()
 
 
+@pytest.fixture
+def profesionales(fabrica_sesiones) -> None:
+    """Dos profesionales de clínica médica y una de pediatría."""
+    with fabrica_sesiones() as sesion:
+        sesion.add_all(
+            [
+                Profesional(email="dr.gomez@ejemplo.com", matricula="MP-1", id_especialidad=1,
+                            nombre="Bruno", apellido="Gómez"),
+                Profesional(email="dra.alvarez@ejemplo.com", matricula="MP-2", id_especialidad=1,
+                            nombre="Carla", apellido="Álvarez"),
+                Profesional(email="dra.suarez@ejemplo.com", matricula="MP-3", id_especialidad=2,
+                            nombre="Ana", apellido="Suárez"),
+            ]
+        )
+        sesion.commit()
+
+
 def datos_profesional(**cambios) -> dict:
-    datos = {"email": "dr.gomez@ejemplo.com", "matricula": "MP-12345", "id_especialidad": 1}
+    datos = {
+        "email": "dr.gomez@ejemplo.com",
+        "matricula": "MP-12345",
+        "id_especialidad": 1,
+        "nombre": "Bruno",
+        "apellido": "Gómez",
+    }
     return datos | cambios

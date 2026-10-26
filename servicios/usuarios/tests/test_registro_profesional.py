@@ -38,7 +38,15 @@ def test_exitoso_crea_usuario_y_profesional_en_catalogo(cliente, catalogo, fabri
         "tipo": "PROFESIONAL",
         "paciente": None,
     }
-    assert catalogo.creados == [("dr.gomez@ejemplo.com", "MP-12345", 1)]
+    assert catalogo.creados == [
+        {
+            "email": "dr.gomez@ejemplo.com",
+            "matricula": "MP-12345",
+            "id_especialidad": 1,
+            "nombre": "Bruno",
+            "apellido": "Gómez",
+        }
+    ]
     assert catalogo.borrados == []
     with fabrica_sesiones() as sesion:
         assert sesion.get(Usuario, "dr.gomez@ejemplo.com").tipo == "PROFESIONAL"
@@ -146,7 +154,15 @@ def test_falla_el_commit_despues_de_crear_en_catalogo_compensa(
     respuesta = cliente.post("/registro/profesional", json=datos_profesional())
 
     assert respuesta.status_code == 503
-    assert catalogo.creados == [("dr.gomez@ejemplo.com", "MP-12345", 1)]
+    assert catalogo.creados == [
+        {
+            "email": "dr.gomez@ejemplo.com",
+            "matricula": "MP-12345",
+            "id_especialidad": 1,
+            "nombre": "Bruno",
+            "apellido": "Gómez",
+        }
+    ]
     assert catalogo.borrados == ["dr.gomez@ejemplo.com"]
     assert not usuario_existe(fabrica_sesiones, "dr.gomez@ejemplo.com")
 

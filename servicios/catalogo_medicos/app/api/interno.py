@@ -17,6 +17,8 @@ router = APIRouter(prefix="/interno", tags=["interno"])
 
 SesionBD = Annotated[Session, Depends(obtener_sesion)]
 
+Nombre = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
+
 
 class DatosProfesional(BaseModel):
     email: EmailStr
@@ -24,6 +26,8 @@ class DatosProfesional(BaseModel):
         str, StringConstraints(strip_whitespace=True, min_length=1, max_length=30)
     ]
     id_especialidad: Annotated[int, Field(gt=0)]
+    nombre: Nombre
+    apellido: Nombre
 
 
 class ProfesionalCreado(BaseModel):
@@ -32,6 +36,8 @@ class ProfesionalCreado(BaseModel):
     email: str
     matricula: str
     id_especialidad: int
+    nombre: str
+    apellido: str
 
 
 class ErrorInterno(BaseModel):

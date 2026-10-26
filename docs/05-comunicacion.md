@@ -23,13 +23,23 @@ PROFESIONAL y, si su propio commit falla, le pide que lo borre (compensación).
 Crea el PROFESIONAL de un USUARIO de tipo PROFESIONAL.
 
 ```json
-{"email": "dr.gomez@ejemplo.com", "matricula": "MP-12345", "id_especialidad": 1}
+{
+  "email": "dr.gomez@ejemplo.com",
+  "matricula": "MP-12345",
+  "id_especialidad": 1,
+  "nombre": "Bruno",
+  "apellido": "Gómez"
+}
 ```
+
+`nombre` y `apellido` son una **copia** de USUARIO, solo para que catálogo
+pueda mostrar el listado de profesionales sin consultar a `usuarios`
+([ADR 004](decisiones/004-copia-nombre-profesional.md)). Son obligatorios.
 
 | Respuesta | Cuándo |
 | --- | --- |
 | `201 Created` | Se creó el profesional. |
-| `200 OK` | Ya existía un profesional con ese email y **los mismos datos** (idempotente). |
+| `200 OK` | Ya existía un profesional con ese email y **la misma matrícula y especialidad** (idempotente). Si nombre o apellido cambiaron, se actualiza la copia. |
 | `409` `MATRICULA_DUPLICADA` | La matrícula pertenece a otro profesional. |
 | `409` `EMAIL_CON_OTROS_DATOS` | Ya existe un profesional con ese email y otra matrícula o especialidad. |
 | `422` `ESPECIALIDAD_INEXISTENTE` | `id_especialidad` no existe en ESPECIALIDAD. |

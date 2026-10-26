@@ -76,7 +76,13 @@ def registrar_profesional(
     _insertar(sesion, usuario)
 
     try:
-        catalogo.crear_profesional(usuario.email, matricula, id_especialidad)
+        catalogo.crear_profesional(
+            email=usuario.email,
+            matricula=matricula,
+            id_especialidad=id_especialidad,
+            nombre=usuario.nombre,
+            apellido=usuario.apellido,
+        )
     except CatalogoNoDisponible as error:
         sesion.rollback()
         if error.puede_haber_creado:

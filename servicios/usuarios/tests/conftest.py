@@ -25,13 +25,23 @@ class CatalogoFalso:
     """Reemplaza al cliente HTTP de catálogo y registra las llamadas recibidas."""
 
     def __init__(self):
-        self.creados: list[tuple[str, str, int]] = []
+        self.creados: list[dict] = []
         self.borrados: list[str] = []
         self.error_al_crear: Exception | None = None
         self.error_al_borrar: Exception | None = None
 
-    def crear_profesional(self, email: str, matricula: str, id_especialidad: int) -> None:
-        self.creados.append((email, matricula, id_especialidad))
+    def crear_profesional(
+        self, *, email: str, matricula: str, id_especialidad: int, nombre: str, apellido: str
+    ) -> None:
+        self.creados.append(
+            {
+                "email": email,
+                "matricula": matricula,
+                "id_especialidad": id_especialidad,
+                "nombre": nombre,
+                "apellido": apellido,
+            }
+        )
         if self.error_al_crear is not None:
             raise self.error_al_crear
 

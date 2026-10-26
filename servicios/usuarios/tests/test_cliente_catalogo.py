@@ -13,6 +13,14 @@ from app.clientes.catalogo import (
     MatriculaYaRegistrada,
 )
 
+ALTA = {
+    "email": "dr.gomez@ejemplo.com",
+    "matricula": "MP-12345",
+    "id_especialidad": 1,
+    "nombre": "Bruno",
+    "apellido": "Gómez",
+}
+
 
 def cliente_con(respuesta_o_error) -> tuple[ClienteCatalogoHttp, list[httpx.Request]]:
     pedidos: list[httpx.Request] = []
@@ -31,7 +39,7 @@ def cliente_con(respuesta_o_error) -> tuple[ClienteCatalogoHttp, list[httpx.Requ
 def test_crear_exitoso_o_idempotente(codigo_http):
     cliente, pedidos = cliente_con(httpx.Response(codigo_http, json={}))
 
-    cliente.crear_profesional("dr.gomez@ejemplo.com", "MP-12345", 1)
+    cliente.crear_profesional(**ALTA)
 
     assert pedidos[0].method == "POST"
     assert pedidos[0].url == "http://catalogo:8002/interno/profesionales"
@@ -39,6 +47,8 @@ def test_crear_exitoso_o_idempotente(codigo_http):
         "email": "dr.gomez@ejemplo.com",
         "matricula": "MP-12345",
         "id_especialidad": 1,
+        "nombre": "Bruno",
+        "apellido": "Gómez",
     }
 
 
@@ -56,7 +66,7 @@ def test_crear_errores_del_contrato(codigo_http, codigo, excepcion):
     )
 
     with pytest.raises(excepcion):
-        cliente.crear_profesional("dr.gomez@ejemplo.com", "MP-12345", 1)
+        cliente.crear_profesional(**ALTA)
 
 
 @pytest.mark.parametrize(
@@ -77,14 +87,14 @@ def test_crear_no_disponible(respuesta_o_error, puede_haber_creado):
     cliente, _ = cliente_con(respuesta_o_error)
 
     with pytest.raises(CatalogoNoDisponible) as error:
-        cliente.crear_profesional("dr.gomez@ejemplo.com", "MP-12345", 1)
+        cliente.crear_profesional(**ALTA)
 
     assert error.value.puede_haber_creado is puede_haber_creado
 
 
 def test_crear_sin_url_configurada():
     with pytest.raises(CatalogoNoDisponible) as error:
-        ClienteCatalogoHttp("", 3.0).crear_profesional("a@b.com", "MP-1", 1)
+        ClienteCatalogoHttp("", 3.0).crear_profesional(**ALTA)
 
     assert error.value.puede_haber_creado is False
 
