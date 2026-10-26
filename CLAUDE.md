@@ -4,7 +4,7 @@
 - Modelo relacional y restricciones: docs/diagramas/modelo-relacional.pdf
 - MER: docs/diagramas/mer.drawio.png
 - Arquitectura: docs/diagramas/arquitectura.drawio.png
-- Editables (draw.io) del MER y la arquitectura: docs/diagramas/mer.drawio y docs/diagramas/arquitectura.drawio
+- Editables: docs/diagramas/mer.drawio y docs/diagramas/arquitectura.drawio (draw.io), y docs/diagramas/modelo-relacional.docx (Word)
 Todo cambio debe ser coherente con estas fuentes. Si algo no coincide, avisar antes de implementar.
 
 ## Contexto
