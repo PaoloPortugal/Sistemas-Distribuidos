@@ -1,9 +1,10 @@
 # Instrucciones para agentes de IA
 
 ## Fuentes de verdad
-- Modelo relacional y restricciones: docs/diagramas/Modelo relacional y restricciones de integridad.pdf
-- MER: docs/diagramas/MER_turnos_clinica_v2.drawio.png
-- Arquitectura: docs/diagramas/Arquitectura_turnos_clinica.drawio.png
+- Modelo relacional y restricciones: docs/diagramas/modelo-relacional.pdf
+- MER: docs/diagramas/mer.drawio.png
+- Arquitectura: docs/diagramas/arquitectura.drawio.png
+- Editables (draw.io) del MER y la arquitectura: docs/diagramas/mer.drawio y docs/diagramas/arquitectura.drawio
 Todo cambio debe ser coherente con estas fuentes. Si algo no coincide, avisar antes de implementar.
 
 ## Contexto

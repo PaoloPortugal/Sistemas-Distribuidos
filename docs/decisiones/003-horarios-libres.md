@@ -28,8 +28,9 @@ tienen un turno RESERVADO (por ejemplo
 `POST /interno/disponibilidades-ocupadas` con los ids). Para borrar, le
 pregunta si la franja tiene turnos.
 
-- **Diagrama de arquitectura:** no cambia; ya existe Catálogo ↔ Reservas por
-  REST.
+- **Diagrama de arquitectura:** agrega la flecha **Catálogo → Reservas**. Hoy
+  la comunicación REST entre los dos va solo de Reservas a Catálogo (validar
+  la franja al reservar, ADR 006).
 - **Consistencia:** inmediata; la respuesta refleja el estado de reservas en
   ese momento.
 - **Disponibilidad:** si reservas está caído, el listado no puede marcar las
@@ -43,8 +44,8 @@ pregunta si la franja tiene turnos.
 Catálogo se suscribe al exchange `turnos` y consume `turno.confirmado` y
 `turno.cancelado` para mantener, por cada disponibilidad, si está ocupada.
 
-- **Diagrama de arquitectura:** agrega **RabbitMQ → Catálogo** (hoy solo
-  consume Notificaciones).
+- **Diagrama de arquitectura:** agrega la flecha **RabbitMQ → Catálogo** (hoy
+  solo consume Notificaciones).
 - **Consistencia:** eventual. Entre que reservas confirma un turno y catálogo
   procesa el evento, el listado puede mostrar como libre una franja ya
   tomada. No rompe la regla de un turno por franja: **reservas sigue siendo
