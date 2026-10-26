@@ -11,7 +11,7 @@ Decisiones en las que sirvió de apoyo:
 - Clasificar la arquitectura como microservicios con comunicación síncrona por REST y eventos asíncronos por RabbitMQ, en lugar de una arquitectura event-driven completa o microservicios completa.
 - Comparar dos variantes para la autenticación: un servicio de Auth separado de Usuarios, o un único servicio que reúne ambos. Se eligió el servicio único para que el registro sea una transacción local y no una operación distribuida.
 
-Aclaración posterior: el registro de pacientes sigue siendo una transacción local en Usuarios. El de profesionales no, porque el equipo decidió que PROFESIONAL viva en el servicio de Catálogo: Usuarios llama por REST a Catálogo y, si no puede confirmar, compensa borrando el profesional creado. La decisión y sus consecuencias están en [ADR 002](decisiones/002-registro-profesional-compensacion.md); el diagrama de arquitectura se actualiza para agregar esa comunicación.
+Aclaración posterior: el registro de pacientes sigue siendo una transacción local en Usuarios. El de profesionales no, porque el equipo decidió que PROFESIONAL viva en el servicio de Catálogo: Usuarios llama por REST a Catálogo y, si no puede confirmar, compensa borrando el profesional creado. La decisión y sus consecuencias están en [ADR 002](decisiones/002-registro-profesional-compensacion.md); el diagrama de arquitectura ya incluye esa comunicación.
 
 ## Esqueleto del proyecto
 

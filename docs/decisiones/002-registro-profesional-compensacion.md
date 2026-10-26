@@ -79,5 +79,6 @@ Las dos operaciones de catálogo son idempotentes por email, así que compensar
 - **Reconciliación de huérfanos:** un proceso que compare PROFESIONAL con
   USUARIO y borre los profesionales sin usuario, o reintentar la compensación
   desde una cola en lugar de solo registrarla en el log.
-- **Diagrama de arquitectura:** agregar la comunicación REST Usuarios → Catálogo
-  (lo actualiza el equipo).
+
+La comunicación REST Usuarios → Catálogo ya figura en el diagrama de
+arquitectura (REST interno (1)).

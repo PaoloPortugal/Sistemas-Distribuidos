@@ -5,7 +5,7 @@
 ## Contexto
 
 `GET /profesionales` de catálogo tiene que mostrar nombre y apellido de cada
-profesional. En el modelo relacional, PROFESIONAL tiene solo `email`,
+profesional. En el modelo relacional original, PROFESIONAL tenía solo `email`,
 `matricula` e `id_especialidad`; nombre y apellido están en USUARIO, que vive
 en el servicio de usuarios. Ningún servicio accede a las tablas de otro.
 
@@ -33,7 +33,8 @@ comunicación nueva entre servicios.
 
 - **Modelo relacional:** PROFESIONAL (`email`, `matricula`, `id_especialidad`,
   `nombre`, `apellido`), con nombre y apellido como copia desnormalizada.
-  El equipo actualiza el PDF.
+  **Ya reflejado** en el MER (como atributos copiados) y en el PDF del modelo
+  relacional.
 - **Contrato** (`docs/05-comunicacion.md`): el POST interno exige `nombre` y
   `apellido`. Un reintento con la misma matrícula y especialidad responde
   200 y actualiza la copia si cambió.
