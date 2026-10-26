@@ -19,7 +19,7 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy.dialects.postgresql import ExcludeConstraint
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 ESQUEMA = "catalogo_medicos"
 
@@ -58,6 +58,12 @@ class Profesional(Base):
     id_especialidad: Mapped[int] = mapped_column(
         ForeignKey(f"{ESQUEMA}.especialidad.id_especialidad", ondelete="RESTRICT")
     )
+    # Copia de USUARIO.nombre y USUARIO.apellido, solo para mostrar (ADR 004).
+    # El dato de verdad está en el servicio de usuarios.
+    nombre: Mapped[str] = mapped_column(String(100))
+    apellido: Mapped[str] = mapped_column(String(100))
+
+    especialidad: Mapped[Especialidad] = relationship()
 
 
 class Servicio(Base):

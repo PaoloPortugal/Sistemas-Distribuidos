@@ -39,16 +39,30 @@ def normalizar_email(email: str) -> str:
 
 
 def crear_profesional(
-    sesion: Session, *, email: str, matricula: str, id_especialidad: int
+    sesion: Session,
+    *,
+    email: str,
+    matricula: str,
+    id_especialidad: int,
+    nombre: str,
+    apellido: str,
 ) -> tuple[Profesional, ResultadoAlta]:
     """Crea el profesional; si ya existe con los mismos datos, no es un error.
+
+    "Los mismos datos" son matrícula y especialidad. Nombre y apellido son una
+    copia para mostrar (ADR 004): en un reintento se actualizan sin que cuente
+    como conflicto.
 
     No se consulta antes de insertar: los conflictos los detecta PostgreSQL
     (PK del email, UNIQUE de la matrícula, FK de la especialidad) y después se
     averigua cuál fue.
     """
     profesional = Profesional(
-        email=normalizar_email(email), matricula=matricula, id_especialidad=id_especialidad
+        email=normalizar_email(email),
+        matricula=matricula,
+        id_especialidad=id_especialidad,
+        nombre=nombre,
+        apellido=apellido,
     )
     sesion.add(profesional)
     try:
@@ -58,6 +72,8 @@ def crear_profesional(
         existente = sesion.get(Profesional, profesional.email)
         if existente is not None:
             if (existente.matricula, existente.id_especialidad) == (matricula, id_especialidad):
+                existente.nombre, existente.apellido = nombre, apellido
+                sesion.commit()
                 return existente, ResultadoAlta.YA_EXISTIA
             raise EmailConOtrosDatos from None
         if _matricula_registrada(sesion, matricula):

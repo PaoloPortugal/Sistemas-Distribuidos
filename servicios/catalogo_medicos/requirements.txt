@@ -7,3 +7,4 @@ alembic
 structlog
 pyjwt[crypto]
 email-validator
+tzdata

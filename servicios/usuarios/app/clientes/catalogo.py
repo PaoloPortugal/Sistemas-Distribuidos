@@ -42,7 +42,9 @@ class CatalogoNoDisponible(ErrorCatalogo):
 
 
 class ClienteCatalogo(Protocol):
-    def crear_profesional(self, email: str, matricula: str, id_especialidad: int) -> None: ...
+    def crear_profesional(
+        self, *, email: str, matricula: str, id_especialidad: int, nombre: str, apellido: str
+    ) -> None: ...
 
     def borrar_profesional(self, email: str) -> None: ...
 
@@ -58,11 +60,20 @@ class ClienteCatalogoHttp:
         self._timeout = timeout_segundos
         self._transporte = transporte
 
-    def crear_profesional(self, email: str, matricula: str, id_especialidad: int) -> None:
+    def crear_profesional(
+        self, *, email: str, matricula: str, id_especialidad: int, nombre: str, apellido: str
+    ) -> None:
+        # nombre y apellido viajan como copia para mostrar en el catálogo (ADR 004).
         respuesta = self._enviar(
             "POST",
             "/interno/profesionales",
-            json={"email": email, "matricula": matricula, "id_especialidad": id_especialidad},
+            json={
+                "email": email,
+                "matricula": matricula,
+                "id_especialidad": id_especialidad,
+                "nombre": nombre,
+                "apellido": apellido,
+            },
         )
         if respuesta.status_code in (200, 201):
             return
