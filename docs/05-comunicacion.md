@@ -71,3 +71,85 @@ distinta de 204: registra "Inconsistencia" en el log y responde 503 al cliente.
 | 422 `ESPECIALIDAD_INEXISTENTE` | 422 "La especialidad no existe" | No |
 | Conexión rechazada, timeout de conexión o respuesta 4xx fuera del contrato (por ejemplo 404) | 503 | No: el pedido no se aplicó |
 | Timeout de lectura, conexión cortada o 5xx | 503 | Sí: el pedido pudo haberse aplicado |
+
+## REST interno: reservas → catalogo_medicos
+
+Lo usa `POST /turnos` de reservas para validar la reserva y copiar los datos
+de la franja en el turno ([ADR 006](decisiones/006-copia-franja-en-turno.md)).
+Es una **consulta**: catálogo no cambia nada, así que si falla no hay nada que
+compensar.
+
+- Base: `URL_CATALOGO` (en Docker Compose, `http://catalogo-medicos:8002`).
+- Timeout del cliente: `TIMEOUT_CATALOGO_SEGUNDOS` (3 s por defecto).
+- Traefik no publica `/interno` (misma regla que arriba).
+
+### GET /interno/disponibilidades/{id_disponibilidad}?id_servicio=
+
+Devuelve en una sola llamada la franja, la especialidad de su profesional y el
+servicio pedido.
+
+```json
+{
+  "id_disponibilidad": 7,
+  "email_profesional": "dr.gomez@ejemplo.com",
+  "fecha": "2026-11-05",
+  "horario_inicio": "09:00:00",
+  "horario_fin": "09:30:00",
+  "id_especialidad": 1,
+  "servicio": {"id_servicio": 1, "nombre": "Consulta general", "id_especialidad": 1}
+}
+```
+
+| Respuesta | Cuándo |
+| --- | --- |
+| `200 OK` | La franja y el servicio existen. **Catálogo solo informa**: devuelve 200 aunque el servicio sea de otra especialidad o la franja ya haya pasado. |
+| `404` `DISPONIBILIDAD_INEXISTENTE` | No existe la disponibilidad. |
+| `404` `SERVICIO_INEXISTENTE` | No existe el servicio. |
+
+### Cómo interpreta `reservas` las respuestas
+
+Las reglas las aplica reservas, en su dominio:
+
+| Situación | Respuesta al cliente de `POST /turnos` |
+| --- | --- |
+| 200 y `servicio.id_especialidad ≠ id_especialidad` (coherencia del servicio) | 422 |
+| 200 y la franja empieza ahora o ya pasó (según `ZONA_HORARIA`) | 422 |
+| 200 y la franja ya tiene un turno RESERVADO (lo decide el índice único parcial) | 409 |
+| 404 `DISPONIBILIDAD_INEXISTENTE` o `SERVICIO_INEXISTENTE` | 404 |
+| Conexión rechazada, timeout o cualquier respuesta fuera del contrato | 503, sin crear nada |
+
+## Eventos: exchange `turnos`
+
+Reservas escribe cada evento en su **outbox** (`reservas.evento_saliente`) en
+la misma transacción que el cambio del turno
+([ADR 005](decisiones/005-outbox-eventos-turno.md)). Publicarlos en RabbitMQ
+y consumirlos en notificaciones es la próxima etapa.
+
+| Evento | Cuándo |
+| --- | --- |
+| `turno.confirmado` | Se reservó un turno. |
+| `turno.cancelado` | Se canceló un turno (paciente o profesional). |
+
+No existe `turno.modificado`: modificar un turno es cancelarlo y reservar otro.
+
+```json
+{
+  "id_evento": "6f1c2b9e-…",
+  "tipo": "turno.cancelado",
+  "ocurrido_en": "2026-11-02T10:00:00-03:00",
+  "id_turno": 15,
+  "id_disponibilidad": 7,
+  "id_servicio": 1,
+  "email_paciente": "ana.perez@ejemplo.com",
+  "email_profesional": "dr.gomez@ejemplo.com",
+  "fecha": "2026-11-05",
+  "horario_inicio": "09:00:00",
+  "horario_fin": "09:30:00",
+  "cancelado_por": "PACIENTE",
+  "motivo": "Viaje"
+}
+```
+
+`cancelado_por` y `motivo` solo vienen en `turno.cancelado`. `id_evento` es el
+`event_id` con el que el consumidor descarta duplicados (la entrega es "al
+menos una vez").
