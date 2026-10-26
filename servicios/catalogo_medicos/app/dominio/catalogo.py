@@ -3,12 +3,38 @@
 from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
 
-from app.db.modelos import Especialidad, Profesional, Servicio
+from app.db.modelos import Disponibilidad, Especialidad, Profesional, Servicio
 from app.dominio.profesionales import normalizar_email
 
 
 class EspecialidadNoEncontrada(Exception):
     pass
+
+
+class DisponibilidadNoEncontrada(Exception):
+    pass
+
+
+class ServicioNoEncontrado(Exception):
+    pass
+
+
+def datos_para_reservar(
+    sesion: Session, id_disponibilidad: int, id_servicio: int
+) -> tuple[Disponibilidad, int, Servicio]:
+    """Franja, especialidad de su profesional y servicio pedido, para reservas.
+
+    Catálogo solo informa: las reglas (coherencia del servicio, franja en el
+    pasado) las aplica reservas.
+    """
+    disponibilidad = sesion.get(Disponibilidad, id_disponibilidad)
+    if disponibilidad is None:
+        raise DisponibilidadNoEncontrada
+    servicio = sesion.get(Servicio, id_servicio)
+    if servicio is None:
+        raise ServicioNoEncontrado
+    profesional = sesion.get(Profesional, disponibilidad.email_profesional)
+    return disponibilidad, profesional.id_especialidad, servicio
 
 
 def listar_especialidades(sesion: Session) -> list[Especialidad]:

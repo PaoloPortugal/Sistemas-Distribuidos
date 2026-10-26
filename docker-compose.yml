@@ -108,13 +108,17 @@ services:
 
   reservas:
     build: ./servicios/reservas
-    env_file: .env
+    # Sin env_file: el contenedor recibe solo sus propias variables.
     environment:
       NOMBRE_SERVICIO: reservas
       URL_BASE_DATOS: postgresql+psycopg://${RESERVAS_DB_USUARIO}:${RESERVAS_DB_CONTRASENA}@postgres:5432/${POSTGRES_DB}
+      # Todavía sin uso: el publicador del outbox va en la próxima etapa (ADR 005).
       URL_RABBITMQ: amqp://${RABBITMQ_USUARIO}:${RABBITMQ_CONTRASENA}@rabbitmq:5672/
       URL_CATALOGO: http://catalogo-medicos:8002
       UVICORN_ROOT_PATH: /api/reservas
+      RUTA_CLAVE_PUBLICA_JWT: /run/secrets/jwt_publica.pem
+      # "Hoy" y el inicio de los turnos para los plazos de cancelación.
+      ZONA_HORARIA: America/Montevideo
     secrets:
       - source: jwt_publica
         target: jwt_publica.pem

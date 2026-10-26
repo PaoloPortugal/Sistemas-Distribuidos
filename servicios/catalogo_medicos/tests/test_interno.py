@@ -198,3 +198,70 @@ def test_crear_borrar_y_crear_de_nuevo(cliente):
     assert cliente.post("/interno/profesionales", json=datos_profesional()).status_code == 201
     assert cliente.delete("/interno/profesionales/dr.gomez%40ejemplo.com").status_code == 204
     assert cliente.post("/interno/profesionales", json=datos_profesional()).status_code == 201
+
+
+# --- GET /interno/disponibilidades/{id}?id_servicio= (lo usa reservas) ---
+
+
+@pytest.fixture
+def franja_de_gomez(cliente, fabrica_sesiones) -> int:
+    cliente.post("/interno/profesionales", json=datos_profesional())
+    with fabrica_sesiones() as sesion:
+        franja = Disponibilidad(
+            email_profesional="dr.gomez@ejemplo.com",
+            fecha=datetime.date(2026, 11, 5),
+            horario_inicio=datetime.time(9, 0),
+            horario_fin=datetime.time(9, 30),
+        )
+        sesion.add(franja)
+        sesion.commit()
+        return franja.id_disponibilidad
+
+
+def test_datos_para_reservar(cliente, franja_de_gomez):
+    # Servicio 1 = "Consulta general", de clínica médica (especialidad 1).
+    respuesta = cliente.get(f"/interno/disponibilidades/{franja_de_gomez}?id_servicio=1")
+
+    assert respuesta.status_code == 200
+    assert respuesta.json() == {
+        "id_disponibilidad": franja_de_gomez,
+        "email_profesional": "dr.gomez@ejemplo.com",
+        "fecha": "2026-11-05",
+        "horario_inicio": "09:00:00",
+        "horario_fin": "09:30:00",
+        "id_especialidad": 1,
+        "servicio": {"id_servicio": 1, "nombre": "Consulta general", "id_especialidad": 1},
+    }
+
+
+def test_datos_para_reservar_informa_aunque_el_servicio_no_corresponda(cliente, franja_de_gomez):
+    """Catálogo solo informa; la coherencia del servicio la decide reservas."""
+    # Servicio 3 = "Control del niño sano", de pediatría (especialidad 2).
+    respuesta = cliente.get(f"/interno/disponibilidades/{franja_de_gomez}?id_servicio=3")
+
+    assert respuesta.status_code == 200
+    assert respuesta.json()["id_especialidad"] == 1
+    assert respuesta.json()["servicio"]["id_especialidad"] == 2
+
+
+def test_datos_para_reservar_disponibilidad_inexistente(cliente):
+    respuesta = cliente.get("/interno/disponibilidades/999?id_servicio=1")
+
+    assert respuesta.status_code == 404
+    assert respuesta.json() == {
+        "detail": "La disponibilidad no existe",
+        "codigo": "DISPONIBILIDAD_INEXISTENTE",
+    }
+
+
+def test_datos_para_reservar_servicio_inexistente(cliente, franja_de_gomez):
+    respuesta = cliente.get(f"/interno/disponibilidades/{franja_de_gomez}?id_servicio=999")
+
+    assert respuesta.status_code == 404
+    assert respuesta.json()["codigo"] == "SERVICIO_INEXISTENTE"
+
+
+def test_datos_para_reservar_sin_servicio_responde_422(cliente, franja_de_gomez):
+    respuesta = cliente.get(f"/interno/disponibilidades/{franja_de_gomez}")
+
+    assert respuesta.status_code == 422

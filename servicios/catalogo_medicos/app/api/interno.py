@@ -1,17 +1,18 @@
-"""Endpoints internos: los usa el servicio de usuarios, no el cliente web.
+"""Endpoints internos: los usan los servicios de usuarios y reservas, no el cliente web.
 
 Contrato en docs/05-comunicacion.md. Traefik no publica /interno.
 """
 
+import datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Response, status
+from fastapi import APIRouter, Depends, Query, Response, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, StringConstraints
 from sqlalchemy.orm import Session
 
 from app.db.sesion import obtener_sesion
-from app.dominio import profesionales
+from app.dominio import catalogo, profesionales
 
 router = APIRouter(prefix="/interno", tags=["interno"])
 
@@ -92,3 +93,53 @@ def borrar_profesional(email: str, sesion: SesionBD):
             "El profesional tiene disponibilidades y no se puede borrar",
         )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+class ServicioInterno(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id_servicio: int
+    nombre: str
+    id_especialidad: int
+
+
+class DisponibilidadParaReservar(BaseModel):
+    id_disponibilidad: int
+    email_profesional: str
+    fecha: datetime.date
+    horario_inicio: datetime.time
+    horario_fin: datetime.time
+    id_especialidad: int
+    servicio: ServicioInterno
+
+
+@router.get(
+    "/disponibilidades/{id_disponibilidad}",
+    response_model=DisponibilidadParaReservar,
+    responses={
+        404: {"model": ErrorInterno, "description": "DISPONIBILIDAD_INEXISTENTE o SERVICIO_INEXISTENTE"},
+    },
+)
+def obtener_para_reservar(
+    id_disponibilidad: int,
+    id_servicio: Annotated[int, Query(description="Servicio que se quiere reservar")],
+    sesion: SesionBD,
+):
+    """Lo que reservas necesita para validar y copiar en el turno (ADR 006)."""
+    try:
+        disponibilidad, id_especialidad, servicio = catalogo.datos_para_reservar(
+            sesion, id_disponibilidad, id_servicio
+        )
+    except catalogo.DisponibilidadNoEncontrada:
+        return _error(404, "DISPONIBILIDAD_INEXISTENTE", "La disponibilidad no existe")
+    except catalogo.ServicioNoEncontrado:
+        return _error(404, "SERVICIO_INEXISTENTE", "El servicio no existe")
+    return DisponibilidadParaReservar(
+        id_disponibilidad=disponibilidad.id_disponibilidad,
+        email_profesional=disponibilidad.email_profesional,
+        fecha=disponibilidad.fecha,
+        horario_inicio=disponibilidad.horario_inicio,
+        horario_fin=disponibilidad.horario_fin,
+        id_especialidad=id_especialidad,
+        servicio=ServicioInterno.model_validate(servicio),
+    )
