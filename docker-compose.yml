@@ -112,8 +112,6 @@ services:
     environment:
       NOMBRE_SERVICIO: reservas
       URL_BASE_DATOS: postgresql+psycopg://${RESERVAS_DB_USUARIO}:${RESERVAS_DB_CONTRASENA}@postgres:5432/${POSTGRES_DB}
-      # Todavía sin uso: el publicador del outbox va en la próxima etapa (ADR 005).
-      URL_RABBITMQ: amqp://${RABBITMQ_USUARIO}:${RABBITMQ_CONTRASENA}@rabbitmq:5672/
       URL_CATALOGO: http://catalogo-medicos:8002
       UVICORN_ROOT_PATH: /api/reservas
       RUTA_CLAVE_PUBLICA_JWT: /run/secrets/jwt_publica.pem
@@ -125,8 +123,6 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.reservas.rule=PathPrefix(`/api/reservas`)"
@@ -134,9 +130,31 @@ services:
       - "traefik.http.routers.reservas.middlewares=reservas-prefijo"
       - "traefik.http.services.reservas.loadbalancer.server.port=8003"
 
+  # Publicador del outbox (ADR 005): misma imagen que reservas, otro proceso.
+  # No corre migraciones; si las tablas o RabbitMQ no están, reintenta.
+  reservas-publicador:
+    build: ./servicios/reservas
+    command: ["python", "-m", "app.publicador"]
+    restart: unless-stopped
+    environment:
+      NOMBRE_SERVICIO: reservas-publicador
+      URL_BASE_DATOS: postgresql+psycopg://${RESERVAS_DB_USUARIO}:${RESERVAS_DB_CONTRASENA}@postgres:5432/${POSTGRES_DB}
+      URL_RABBITMQ: amqp://${RABBITMQ_USUARIO}:${RABBITMQ_CONTRASENA}@rabbitmq:5672/
+      # 0 = sin pausa. pruebas/e2e la sube para matar al publicador a mitad de un lote.
+      PUBLICADOR_PAUSA_ENTRE_EVENTOS_SEGUNDOS: ${PUBLICADOR_PAUSA_ENTRE_EVENTOS_SEGUNDOS:-0}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      reservas:
+        condition: service_started
+
+  # Consumidor de eventos y envío de mails, como dos tareas en un contenedor (ADR 008).
   notificaciones:
     build: ./servicios/notificaciones
-    env_file: .env
+    restart: unless-stopped
+    # Sin env_file: el contenedor recibe solo sus propias variables.
     environment:
       NOMBRE_SERVICIO: notificaciones
       URL_BASE_DATOS: postgresql+psycopg://${NOTIFICACIONES_DB_USUARIO}:${NOTIFICACIONES_DB_CONTRASENA}@postgres:5432/${POSTGRES_DB}
@@ -144,8 +162,17 @@ services:
       SMTP_HOST: mailpit
       SMTP_PUERTO: "1025"
     depends_on:
+      postgres:
+        condition: service_healthy
       rabbitmq:
         condition: service_healthy
+    healthcheck:
+      # /salud responde 503 si el consumidor perdió la conexión con RabbitMQ.
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8004/salud', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
 
 volumes:
   datos_postgres:
