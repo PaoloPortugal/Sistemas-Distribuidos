@@ -56,6 +56,48 @@ class FranjaYaEmpezo(Exception):
     pass
 
 
+def obtener_propiedad(
+    sesion: Session, id_disponibilidad: int, email_profesional: str
+) -> Disponibilidad:
+    disponibilidad = sesion.get(Disponibilidad, id_disponibilidad)
+    if disponibilidad is None:
+        raise DisponibilidadNoEncontrada
+    if disponibilidad.email_profesional != normalizar_email(email_profesional):
+        raise DisponibilidadAjena
+    return disponibilidad
+
+
+def modificar_disponibilidad(
+    sesion: Session,
+    *,
+    id_disponibilidad: int,
+    email_profesional: str,
+    fecha: datetime.date,
+    horario_inicio: datetime.time,
+    horario_fin: datetime.time,
+    ahora: datetime.datetime,
+) -> Disponibilidad:
+    disponibilidad = obtener_propiedad(sesion, id_disponibilidad, email_profesional)
+    if horario_inicio >= horario_fin:
+        raise HorarioInvalido
+    if datetime.datetime.combine(fecha, horario_inicio) <= ahora:
+        raise FranjaEnElPasado
+    disponibilidad.fecha = fecha
+    disponibilidad.horario_inicio = horario_inicio
+    disponibilidad.horario_fin = horario_fin
+    try:
+        sesion.commit()
+    except IntegrityError:
+        sesion.rollback()
+        existente = _franja_que_se_superpone(
+            sesion, disponibilidad.email_profesional, fecha, horario_inicio, horario_fin
+        )
+        if existente is not None and existente.id_disponibilidad != id_disponibilidad:
+            raise FranjaSuperpuesta(existente) from None
+        raise
+    return disponibilidad
+
+
 def crear_disponibilidad(
     sesion: Session,
     *,

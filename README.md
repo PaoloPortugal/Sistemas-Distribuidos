@@ -40,6 +40,11 @@ El script crea cinco profesionales de Clínica médica, Pediatría, Cardiología
 Dermatología, con horarios durante los próximos días hábiles. Se puede ejecutar
 más de una vez: los profesionales y horarios que ya existan se omiten.
 
+En el frontend, esos profesionales ingresan desde la pestaña **Profesional**.
+Su pantalla **Horarios** permite consultar la agenda por día y crear,
+modificar o eliminar disponibilidades. Los horarios que ya tienen una consulta
+reservada se muestran como **Agendado** y quedan protegidos en la interfaz.
+
 La contraseña compartida de los profesionales de demo es
 `DemoTurnos2026!`. Se puede cambiar sin editar el script:
 

@@ -77,7 +77,7 @@ services:
         condition: service_healthy
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.usuarios.rule=PathPrefix(`/api/usuarios`)"
+      - "traefik.http.routers.usuarios.rule=PathPrefix(`/api/usuarios`) && !PathPrefix(`/api/usuarios/interno`)"
       - "traefik.http.middlewares.usuarios-prefijo.stripprefix.prefixes=/api/usuarios"
       - "traefik.http.routers.usuarios.middlewares=usuarios-prefijo"
       - "traefik.http.services.usuarios.loadbalancer.server.port=8001"
@@ -116,6 +116,7 @@ services:
       NOMBRE_SERVICIO: reservas
       URL_BASE_DATOS: postgresql+psycopg://${RESERVAS_DB_USUARIO}:${RESERVAS_DB_CONTRASENA}@postgres:5432/${POSTGRES_DB}
       URL_CATALOGO: http://catalogo-medicos:8002
+      URL_USUARIOS: http://usuarios:8001
       UVICORN_ROOT_PATH: /api/reservas
       RUTA_CLAVE_PUBLICA_JWT: /run/secrets/jwt_publica.pem
       # "Hoy" y el inicio de los turnos para los plazos de cancelación.

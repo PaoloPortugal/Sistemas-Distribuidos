@@ -25,6 +25,8 @@ class TurnoPublico(BaseModel):
     id_turno: int
     estado: str
     email_paciente: str
+    nombre_paciente: str | None = None
+    apellido_paciente: str | None = None
     email_profesional: str
     id_disponibilidad: int
     id_servicio: int
