@@ -23,9 +23,35 @@ sh infra/claves/generar_claves.sh # claves JWT de desarrollo (una sola vez)
 docker compose up --build
 ```
 
-- Frontend: http://localhost:8080
+- Frontend React: http://localhost:8080
 - APIs: http://localhost:8080/api/usuarios, /api/catalogo-medicos, /api/reservas
 - Swagger de cada servicio: `/api/<servicio>/docs`
+
+### Datos de demo
+
+Con los servicios levantados, se pueden crear profesionales, especialidades y
+horarios de ejemplo usando las APIs del gateway:
+
+```bash
+./scripts/sembrar_demo.sh
+```
+
+El script crea cinco profesionales de Clínica médica, Pediatría, Cardiología y
+Dermatología, con horarios durante los próximos días hábiles. Se puede ejecutar
+más de una vez: los profesionales y horarios que ya existan se omiten.
+
+La contraseña compartida de los profesionales de demo es
+`DemoTurnos2026!`. Se puede cambiar sin editar el script:
+
+```bash
+DEMO_CONTRASENA='otra-clave-segura' ./scripts/sembrar_demo.sh
+```
+
+Para usar otro gateway:
+
+```bash
+BASE_URL='http://localhost:9000' ./scripts/sembrar_demo.sh
+```
 
 ### Extensiones de PostgreSQL
 
@@ -73,7 +99,7 @@ sh infra/claves/generar_claves.sh
 ```
 servicios/      Un directorio por microservicio (código, Dockerfile, tests)
 gateway/        Configuración de Traefik
-frontend/       Cliente web mínimo (HTML + JS)
+frontend/      Cliente web React estático (Babel en el navegador + Nginx)
 infra/          Scripts de PostgreSQL y observabilidad
 pruebas/        Pruebas end-to-end y de concurrencia
 docs/           Informe por secciones, ADRs y diagramas
