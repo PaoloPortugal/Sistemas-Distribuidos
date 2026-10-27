@@ -144,6 +144,8 @@ services:
       SMTP_HOST: mailpit
       SMTP_PUERTO: "1025"
     depends_on:
+      postgres:
+        condition: service_healthy
       rabbitmq:
         condition: service_healthy
 

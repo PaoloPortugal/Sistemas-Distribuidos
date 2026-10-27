@@ -122,8 +122,10 @@ Las reglas las aplica reservas, en su dominio:
 
 Reservas escribe cada evento en su **outbox** (`reservas.evento_saliente`) en
 la misma transacción que el cambio del turno
-([ADR 005](decisiones/005-outbox-eventos-turno.md)). Publicarlos en RabbitMQ
-y consumirlos en notificaciones es la próxima etapa.
+([ADR 005](decisiones/005-outbox-eventos-turno.md)). El publicador de Reservas
+lee los eventos pendientes, los publica como mensajes persistentes y solo
+completa `publicado_en` después de la confirmación del broker. Si RabbitMQ no
+está disponible, los eventos quedan en el outbox para el siguiente intento.
 
 | Evento | Cuándo |
 | --- | --- |
@@ -153,3 +155,10 @@ No existe `turno.modificado`: modificar un turno es cancelarlo y reservar otro.
 `cancelado_por` y `motivo` solo vienen en `turno.cancelado`. `id_evento` es el
 `event_id` con el que el consumidor descarta duplicados (la entrega es "al
 menos una vez").
+
+El consumidor de Notificaciones usa una cola durable, registra los `id_evento`
+en `notificaciones.evento_procesado` y envía dos correos por evento. Los
+fallos se reintentan con backoff hasta `MAX_REINTENTOS`; después se rechazan y
+se descartan.
+La configuración se realiza con `URL_RABBITMQ`, `SMTP_HOST`, `SMTP_PUERTO` y
+`MAX_REINTENTOS`.

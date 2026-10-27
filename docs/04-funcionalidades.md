@@ -64,10 +64,12 @@ reservar.
 
 ## Notificaciones
 
-Cada reserva y cada cancelación generan un mail al paciente y otro al
+Cada reserva y cada cancelación generan un evento outbox y, cuando el
+publicador confirma su entrega en RabbitMQ, un mail al paciente y otro al
 profesional, con la fecha, el horario y, en las cancelaciones, quién canceló
-y el motivo. En desarrollo se ven en Mailpit (`http://localhost:8025`). Los
-mails no llevan nombres, solo los emails
+y el motivo. El consumidor registra cada `id_evento` procesado para evitar
+duplicados y reintenta fallos transitorios. En desarrollo los mails se ven en
+Mailpit (`http://localhost:8025`). Los mails no llevan nombres, solo los emails
 ([ADR 008](decisiones/008-notificaciones.md)).
 
 ## Pruebas

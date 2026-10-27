@@ -9,6 +9,8 @@ class Configuracion(BaseSettings):
     zona_horaria: str = "America/Montevideo"
     url_catalogo: str = ""
     timeout_catalogo_segundos: float = 3.0
+    url_rabbitmq: str = ""
+    intervalo_publicador_segundos: float = 1.0
 
 
 configuracion = Configuracion()
