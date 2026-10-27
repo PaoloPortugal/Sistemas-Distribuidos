@@ -23,6 +23,7 @@ from app.clientes.catalogo import (
     ServicioInexistente,
     obtener_cliente_catalogo,
 )
+from app.clientes.usuarios import DatosUsuario, UsuariosNoDisponible, obtener_cliente_usuarios
 from app.config import configuracion
 from app.db.modelos import ESQUEMA, Base
 from app.db.sesion import obtener_sesion
@@ -84,6 +85,21 @@ class CatalogoFalso:
             id_servicio=id_servicio,
             id_especialidad_servicio=self.servicios[id_servicio],
         )
+
+
+class UsuariosFalso:
+    """Reemplaza al cliente HTTP de usuarios: nombres en memoria."""
+
+    def __init__(self):
+        self.usuarios = {ANA: DatosUsuario("Ana", "Pérez"), BETO: DatosUsuario("Beto", "Díaz")}
+        self.caido = False
+        self.consultas: list[list[str]] = []
+
+    def nombres(self, emails: list[str]) -> dict[str, DatosUsuario]:
+        self.consultas.append(list(emails))
+        if self.caido:
+            raise UsuariosNoDisponible("timeout")
+        return {email: self.usuarios[email] for email in emails if email in self.usuarios}
 
 
 class Reloj:
@@ -185,18 +201,24 @@ def catalogo() -> CatalogoFalso:
 
 
 @pytest.fixture
+def usuarios() -> UsuariosFalso:
+    return UsuariosFalso()
+
+
+@pytest.fixture
 def reloj_fijo() -> Reloj:
     return Reloj()
 
 
 @pytest.fixture
-def cliente(fabrica_sesiones, catalogo, reloj_fijo) -> Iterator[TestClient]:
+def cliente(fabrica_sesiones, catalogo, usuarios, reloj_fijo) -> Iterator[TestClient]:
     def sesion_de_prueba() -> Iterator[Session]:
         with fabrica_sesiones() as sesion:
             yield sesion
 
     app.dependency_overrides[obtener_sesion] = sesion_de_prueba
     app.dependency_overrides[obtener_cliente_catalogo] = lambda: catalogo
+    app.dependency_overrides[obtener_cliente_usuarios] = lambda: usuarios
     app.dependency_overrides[reloj.ahora] = lambda: reloj_fijo.ahora
     with TestClient(app) as cliente:
         yield cliente

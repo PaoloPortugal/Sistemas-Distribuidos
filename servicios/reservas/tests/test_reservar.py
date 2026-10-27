@@ -1,11 +1,14 @@
 """POST /turnos, GET /mis-turnos y GET /agenda. Reloj fijo: lunes 2/11/2026 10:00."""
 
 import datetime
+import time
 
+import httpx
 import pytest
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
+from app.clientes.usuarios import ClienteUsuariosHttp, obtener_cliente_usuarios
 from app.db.modelos import EventoSaliente, Turno
 from app.db.sesion import obtener_sesion
 from app.main import app
@@ -287,6 +290,61 @@ def test_agenda_por_defecto_hoy_y_30_dias(cliente, como_gomez, turnos_de_la_sema
         ("2026-11-03", BETO),
         ("2026-11-05", ANA),
     ]
+
+
+def test_agenda_con_nombres_en_una_sola_consulta(cliente, como_gomez, turnos_de_la_semana, usuarios):
+    respuesta = cliente.get("/agenda?hasta=2026-12-31", headers=como_gomez)
+
+    assert respuesta.status_code == 200
+    assert [
+        (t["email_paciente"], t["nombre_paciente"], t["apellido_paciente"]) for t in respuesta.json()
+    ] == [(BETO, "Beto", "Díaz"), (ANA, "Ana", "Pérez"), (ANA, "Ana", "Pérez")]
+    # Una consulta para toda la agenda, con cada paciente una sola vez.
+    assert usuarios.consultas == [[ANA, BETO]]
+
+
+def test_agenda_con_usuarios_caido_sale_sin_nombres(cliente, como_gomez, turnos_de_la_semana, usuarios):
+    usuarios.caido = True
+
+    respuesta = cliente.get("/agenda", headers=como_gomez)
+
+    assert respuesta.status_code == 200
+    assert [(t["email_paciente"], t["nombre_paciente"], t["apellido_paciente"]) for t in respuesta.json()] == [
+        (BETO, None, None),
+        (ANA, None, None),
+    ]
+
+
+def test_agenda_con_usuarios_lento_responde_a_tiempo_sin_nombres(
+    cliente, como_gomez, turnos_de_la_semana
+):
+    def lento(_pedido: httpx.Request) -> httpx.Response:
+        time.sleep(1.0)
+        return httpx.Response(200, json={"usuarios": []})
+
+    app.dependency_overrides[obtener_cliente_usuarios] = lambda: ClienteUsuariosHttp(
+        "http://usuarios:8001", 0.2, httpx.MockTransport(lento)
+    )
+
+    inicio = time.monotonic()
+    respuesta = cliente.get("/agenda", headers=como_gomez)
+
+    assert time.monotonic() - inicio < 0.8
+    assert respuesta.status_code == 200
+    assert [t["nombre_paciente"] for t in respuesta.json()] == [None, None]
+
+
+def test_agenda_paciente_desconocido_en_usuarios(cliente, como_gomez, turnos_de_la_semana, usuarios):
+    del usuarios.usuarios[BETO]
+
+    respuesta = cliente.get("/agenda", headers=como_gomez)
+
+    assert [t["nombre_paciente"] for t in respuesta.json()] == [None, "Ana"]
+
+
+def test_agenda_vacia_no_consulta_a_usuarios(cliente, como_gomez, usuarios):
+    assert cliente.get("/agenda", headers=como_gomez).json() == []
+    assert usuarios.consultas == []
 
 
 def test_agenda_con_rango(cliente, como_gomez, turnos_de_la_semana):

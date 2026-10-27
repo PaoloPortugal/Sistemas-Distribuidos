@@ -41,9 +41,16 @@ Dermatología, con horarios durante los próximos días hábiles. Se puede ejecu
 más de una vez: los profesionales y horarios que ya existan se omiten.
 
 En el frontend, esos profesionales ingresan desde la pestaña **Profesional**.
-Su pantalla **Horarios** permite consultar la agenda por día y crear,
-modificar o eliminar disponibilidades. Los horarios que ya tienen una consulta
-reservada se muestran como **Agendado** y quedan protegidos en la interfaz.
+Su pantalla **Horarios** permite consultar la agenda por día, crear y eliminar
+disponibilidades. **Modificar** un horario lo elimina y crea otro con los
+datos nuevos (ADR 003); si el horario no se puede eliminar, no se crea el
+nuevo. Los horarios que ya tienen una consulta reservada se muestran como
+**Agendado**: el backend no deja eliminarlos (409) hasta que se cancele el
+turno.
+
+Los pacientes solo ven los horarios libres. Los avisos de confirmación y
+cancelación llegan por mail; en desarrollo se ven en Mailpit
+(http://localhost:8025).
 
 La contraseña compartida de los profesionales de demo es
 `DemoTurnos2026!`. Se puede cambiar sin editar el script:

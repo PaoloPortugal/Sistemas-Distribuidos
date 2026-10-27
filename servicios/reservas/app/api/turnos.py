@@ -6,7 +6,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
-from app.api.esquemas import DatosCancelacion, DatosReserva, Error, TurnoPublico
+from app.api.esquemas import DatosCancelacion, DatosReserva, Error, TurnoEnAgenda, TurnoPublico
 from app.api.seguridad import (
     RESPUESTAS_AUTENTICACION,
     RESPUESTAS_PACIENTE,
@@ -16,7 +16,6 @@ from app.api.seguridad import (
     UsuarioActual,
 )
 from app.clientes import catalogo, usuarios
-from app.config import configuracion
 from app.db.sesion import obtener_sesion
 from app.dominio import reloj, turnos
 
@@ -24,6 +23,7 @@ router = APIRouter(tags=["turnos"])
 
 SesionBD = Annotated[Session, Depends(obtener_sesion)]
 Catalogo = Annotated[catalogo.ClienteCatalogo, Depends(catalogo.obtener_cliente_catalogo)]
+Usuarios = Annotated[usuarios.ClienteUsuarios, Depends(usuarios.obtener_cliente_usuarios)]
 Ahora = Annotated[datetime.datetime, Depends(reloj.ahora)]
 
 CATALOGO_NO_DISPONIBLE = "El catálogo no está disponible. Intentá de nuevo más tarde"
@@ -136,12 +136,13 @@ def cancelar(
 
 @router.get(
     "/agenda",
-    response_model=list[TurnoPublico],
+    response_model=list[TurnoEnAgenda],
     responses=RESPUESTAS_PROFESIONAL | {422: {"description": "Rango de fechas inválido"}},
 )
 def agenda(
     profesional: ProfesionalActual,
     sesion: SesionBD,
+    cliente_usuarios: Usuarios,
     ahora: Ahora,
     desde: Annotated[
         datetime.date | None, Query(description="Primer día (incluido). Por defecto, hoy.")
@@ -156,20 +157,16 @@ def agenda(
     except turnos.RangoInvalido as error:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(error)) from None
     agenda = turnos.agenda(sesion, profesional.email, desde, hasta)
-    nombres = {}
-    if configuracion.url_usuarios:
-        for turno in agenda:
-            if turno.email_paciente not in nombres:
-                nombres[turno.email_paciente] = usuarios.obtener_usuario(turno.email_paciente)
-    return [
-        {
-            **turno.__dict__,
-            "nombre_paciente": nombres.get(turno.email_paciente).nombre
-            if turno.email_paciente in nombres
-            else None,
-            "apellido_paciente": nombres.get(turno.email_paciente).apellido
-            if turno.email_paciente in nombres
-            else None,
-        }
-        for turno in agenda
-    ]
+    nombres = turnos.nombres_de_pacientes(agenda, cliente_usuarios)
+    respuesta = []
+    for turno in agenda:
+        datos = nombres.get(turno.email_paciente)
+        respuesta.append(
+            TurnoEnAgenda.model_validate(turno).model_copy(
+                update={
+                    "nombre_paciente": datos.nombre if datos else None,
+                    "apellido_paciente": datos.apellido if datos else None,
+                }
+            )
+        )
+    return respuesta

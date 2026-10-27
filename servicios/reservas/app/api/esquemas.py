@@ -25,8 +25,6 @@ class TurnoPublico(BaseModel):
     id_turno: int
     estado: str
     email_paciente: str
-    nombre_paciente: str | None = None
-    apellido_paciente: str | None = None
     email_profesional: str
     id_disponibilidad: int
     id_servicio: int
@@ -37,6 +35,17 @@ class TurnoPublico(BaseModel):
     fecha_cancelacion: datetime.datetime | None
     motivo_cancelacion: str | None
     cancelado_por: str | None
+
+
+class TurnoEnAgenda(TurnoPublico):
+    """Turno de la agenda del profesional, con el nombre del paciente (ADR 009)."""
+
+    nombre_paciente: str | None = Field(
+        default=None, description="null si el servicio de usuarios no respondió"
+    )
+    apellido_paciente: str | None = Field(
+        default=None, description="null si el servicio de usuarios no respondió"
+    )
 
 
 class Error(BaseModel):

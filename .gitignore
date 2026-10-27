@@ -8,3 +8,4 @@ venv/
 .vscode/
 *.pem
 secretos/
+.DS_Store

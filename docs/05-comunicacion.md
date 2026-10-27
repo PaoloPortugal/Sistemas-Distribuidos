@@ -119,6 +119,42 @@ Las reglas las aplica reservas, en su dominio:
 | 404 `DISPONIBILIDAD_INEXISTENTE` o `SERVICIO_INEXISTENTE` | 404 |
 | Conexión rechazada, timeout o cualquier respuesta fuera del contrato | 503, sin crear nada |
 
+## REST interno: reservas → usuarios
+
+Lo usa `GET /agenda` de reservas para mostrar el nombre de cada paciente
+([ADR 009](decisiones/009-nombres-de-pacientes-en-la-agenda.md)). Es una
+**consulta**: si falla, la agenda sale igual, sin nombres.
+
+- Base: `URL_USUARIOS` (en Docker Compose, `http://usuarios:8001`).
+- Timeout: `TIMEOUT_USUARIOS_SEGUNDOS` (3 s por defecto), sobre el pedido
+  completo, incluida la resolución DNS.
+- Traefik no publica `/interno` (la regla del router de usuarios excluye
+  `/api/usuarios/interno`).
+
+### POST /interno/usuarios/nombres
+
+```json
+{"emails": ["ana.perez@ejemplo.com", "beto.diaz@ejemplo.com"]}
+```
+
+Responde `200` con los que existen, ordenados por email (los demás se
+omiten). Los emails se comparan en minúsculas. Hasta 1000; con más, `422`.
+
+```json
+{"usuarios": [{"email": "ana.perez@ejemplo.com", "nombre": "Ana", "apellido": "Pérez"}]}
+```
+
+| Respuesta de usuarios | Agenda de reservas |
+| --- | --- |
+| 200 | Cada turno con `nombre_paciente` y `apellido_paciente`; `null` en los pacientes que usuarios no devolvió |
+| Conexión rechazada, timeout o respuesta fuera del contrato | 200, con `nombre_paciente` y `apellido_paciente` en `null` |
+
+### GET /interno/usuarios/{email}
+
+Un solo usuario (`{"email", "nombre", "apellido"}`); `404`
+`USUARIO_INEXISTENTE` si no existe. El email va codificado en la URL
+(`@` → `%40`). Reservas no lo usa.
+
 ## REST interno: catalogo_medicos → reservas
 
 Lo usan los listados de horarios (para marcar `libre`) y el borrado de un

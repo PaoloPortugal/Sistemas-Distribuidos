@@ -7,6 +7,7 @@ transacción (ADR 005).
 """
 
 import datetime
+import logging
 import uuid
 
 from sqlalchemy import select
@@ -14,6 +15,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.clientes.catalogo import ClienteCatalogo
+from app.clientes.usuarios import ClienteUsuarios, DatosUsuario, UsuariosNoDisponible
 from app.db.modelos import (
     CANCELADO,
     PACIENTE,
@@ -29,6 +31,8 @@ from app.dominio import bloqueos, reloj
 PLAZO_CANCELACION_PACIENTE = datetime.timedelta(hours=24)
 DIAS_POR_DEFECTO = 30
 DIAS_MAXIMOS = 90
+
+registro = logging.getLogger(__name__)
 
 
 class ServicioNoCorresponde(Exception):
@@ -184,6 +188,21 @@ def agenda(
         .order_by(Turno.fecha, Turno.horario_inicio, Turno.id_turno)
     )
     return list(sesion.scalars(consulta))
+
+
+def nombres_de_pacientes(turnos: list[Turno], usuarios: ClienteUsuarios) -> dict[str, DatosUsuario]:
+    """Nombre y apellido de los pacientes de la agenda, en una sola consulta (ADR 009).
+
+    Si usuarios no responde, sin nombres: la agenda no depende de usuarios.
+    """
+    emails = sorted({t.email_paciente for t in turnos})
+    if not emails:
+        return {}
+    try:
+        return usuarios.nombres(emails)
+    except UsuariosNoDisponible as error:
+        registro.warning("No se pudo consultar a usuarios (%s); agenda sin nombres", error)
+        return {}
 
 
 def resolver_rango(
