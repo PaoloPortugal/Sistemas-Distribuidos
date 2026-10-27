@@ -15,7 +15,8 @@ from app.api.seguridad import (
     ProfesionalActual,
     UsuarioActual,
 )
-from app.clientes import catalogo
+from app.clientes import catalogo, usuarios
+from app.config import configuracion
 from app.db.sesion import obtener_sesion
 from app.dominio import reloj, turnos
 
@@ -154,4 +155,21 @@ def agenda(
         desde, hasta = turnos.resolver_rango(desde, hasta, ahora.date())
     except turnos.RangoInvalido as error:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(error)) from None
-    return turnos.agenda(sesion, profesional.email, desde, hasta)
+    agenda = turnos.agenda(sesion, profesional.email, desde, hasta)
+    nombres = {}
+    if configuracion.url_usuarios:
+        for turno in agenda:
+            if turno.email_paciente not in nombres:
+                nombres[turno.email_paciente] = usuarios.obtener_usuario(turno.email_paciente)
+    return [
+        {
+            **turno.__dict__,
+            "nombre_paciente": nombres.get(turno.email_paciente).nombre
+            if turno.email_paciente in nombres
+            else None,
+            "apellido_paciente": nombres.get(turno.email_paciente).apellido
+            if turno.email_paciente in nombres
+            else None,
+        }
+        for turno in agenda
+    ]

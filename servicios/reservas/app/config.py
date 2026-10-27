@@ -9,6 +9,8 @@ class Configuracion(BaseSettings):
     zona_horaria: str = "America/Montevideo"
     url_catalogo: str = ""
     timeout_catalogo_segundos: float = 3.0
+    url_usuarios: str = ""
+    timeout_usuarios_segundos: float = 3.0
     # Publicador del outbox (proceso aparte: python -m app.publicador).
     url_rabbitmq: str = ""
     publicador_lote: int = 50
