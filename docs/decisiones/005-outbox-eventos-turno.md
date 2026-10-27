@@ -1,7 +1,7 @@
 # 005 — Outbox para los eventos de turno
 
-**Estado:** aceptada. En esta etapa reservas solo **escribe** el outbox;
-publicarlo en RabbitMQ y el servicio de notificaciones van en la próxima.
+**Estado:** aceptada e implementada: reservas escribe el outbox y el proceso
+`reservas-publicador` lo publica en RabbitMQ. El consumo está en el ADR 008.
 
 ## Contexto
 
@@ -41,17 +41,40 @@ RabbitMQ, y no hay una transacción que abarque los dos.
   así notificaciones puede armar el mensaje sin consultar a catálogo.
 - Es una tabla técnica, como `alembic_version`: no forma parte del MER.
 
-## Próxima etapa: publicador
+## Publicador
 
-Un proceso en reservas lee los eventos con `publicado_en` nulo en orden de
-`creado_en`, los publica en el exchange `turnos` con confirmación del broker
-(publisher confirms) y recién entonces completa `publicado_en`.
+Proceso aparte: servicio `reservas-publicador` en Docker Compose, con la misma
+imagen que reservas y el comando `python -m app.publicador` (un tipo de
+proceso, en términos de 12-Factor). Código en `app/publicador.py`,
+`app/eventos.py` y `app/dominio/publicacion.py`.
 
-- Si se cae después de publicar y antes de marcar, el evento se publica de
-  nuevo: por eso la entrega es "al menos una vez" y el consumidor tiene que
-  ser idempotente por `id_evento`.
-- Con más de una réplica, cada una debería tomar eventos distintos
-  (`SELECT … FOR UPDATE SKIP LOCKED`), por la misma razón que el ADR 001.
+- Toma los eventos con `publicado_en` nulo en orden de `creado_en`, **uno por
+  transacción**, con `SELECT … FOR UPDATE SKIP LOCKED`: varias réplicas no
+  toman el mismo evento.
+- Los publica en el exchange `turnos` (topic, durable) con routing key = tipo,
+  `message_id` = `id_evento` y mensajes persistentes, en un canal con
+  **publisher confirms**. Completa `publicado_en` **solo cuando el broker
+  confirma**; si lo rechaza, el evento queda pendiente y no se saltea.
+- Publica con `mandatory`: si todavía no hay ninguna cola ligada (por ejemplo,
+  notificaciones nunca arrancó), el broker lo devuelve y el evento queda en
+  el outbox, en lugar de descartarse en silencio.
+- Si RabbitMQ o la base no responden, reintenta con espera creciente (1, 2,
+  4… hasta 30 s). No corre migraciones (ADR 001): si las tablas no existen,
+  también reintenta.
+- Si se cae después de la confirmación y antes del commit, el evento se
+  publica de nuevo: la entrega es "al menos una vez" y el consumidor descarta
+  duplicados por `id_evento` (ADR 008).
+- `PUBLICADOR_PAUSA_ENTRE_EVENTOS_SEGUNDOS` (0 por defecto) limita el ritmo; la
+  prueba de fallos parciales c) la usa para matar al publicador a mitad de un
+  lote.
+
+### Por qué un proceso aparte y no una tarea dentro de la API
+
+| | Proceso aparte (elegido) | Tarea dentro de la API |
+| --- | --- | --- |
+| Escala | Independiente de la API | Cada réplica de la API sería también un publicador |
+| Fallos | Se puede reiniciar sin cortar la API; un problema con RabbitMQ no afecta a quien atiende pedidos | Comparte proceso con los pedidos |
+| Arquitectura | Un contenedor más en el diagrama | Sin cambios |
 
 ## Consecuencias
 
@@ -62,5 +85,5 @@ Un proceso en reservas lee los eventos con `publicado_en` nulo en orden de
   de Reservas y la flecha a RabbitMQ como "publica evento (desde el outbox)";
   el PDF del modelo relacional explica que la participación total de TURNO en
   "notifica" se asegura con el outbox.
-- Hasta que exista el publicador, los eventos se acumulan en la tabla sin
-  perderse.
+- Si RabbitMQ o el publicador están caídos, los eventos se acumulan en la
+  tabla sin perderse y salen cuando vuelven (prueba de fallos parciales b).
