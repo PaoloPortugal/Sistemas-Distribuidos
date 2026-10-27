@@ -92,6 +92,9 @@ services:
       RUTA_CLAVE_PUBLICA_JWT: /run/secrets/jwt_publica.pem
       # "Hoy" para rechazar franjas en el pasado y para los rangos por defecto.
       ZONA_HORARIA: America/Montevideo
+      # Horarios ocupados y bloqueo al borrar (ADR 003). Sin depends_on: si
+      # reservas no está, el listado sale sin marcar y borrar responde 503.
+      URL_RESERVAS: http://reservas:8003
     secrets:
       - source: jwt_publica
         target: jwt_publica.pem
@@ -125,7 +128,8 @@ services:
         condition: service_healthy
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.reservas.rule=PathPrefix(`/api/reservas`)"
+      # /interno es solo para otros servicios (red interna): Traefik no lo publica.
+      - "traefik.http.routers.reservas.rule=PathPrefix(`/api/reservas`) && !PathPrefix(`/api/reservas/interno`)"
       - "traefik.http.middlewares.reservas-prefijo.stripprefix.prefixes=/api/reservas"
       - "traefik.http.routers.reservas.middlewares=reservas-prefijo"
       - "traefik.http.services.reservas.loadbalancer.server.port=8003"

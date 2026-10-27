@@ -114,9 +114,69 @@ Las reglas las aplica reservas, en su dominio:
 | --- | --- |
 | 200 y `servicio.id_especialidad ≠ id_especialidad` (coherencia del servicio) | 422 |
 | 200 y la franja empieza ahora o ya pasó (según `ZONA_HORARIA`) | 422 |
-| 200 y la franja ya tiene un turno RESERVADO (lo decide el índice único parcial) | 409 |
+| 200 y la franja ya tiene un turno RESERVADO (lo decide el índice único parcial) | 409 "El horario ya está reservado" |
+| 200 pero catálogo está borrando la franja o ya la borró (bloqueo, ver abajo) | 409 "El horario no está disponible en este momento" |
 | 404 `DISPONIBILIDAD_INEXISTENTE` o `SERVICIO_INEXISTENTE` | 404 |
 | Conexión rechazada, timeout o cualquier respuesta fuera del contrato | 503, sin crear nada |
+
+## REST interno: catalogo_medicos → reservas
+
+Lo usan los listados de horarios (para marcar `libre`) y el borrado de un
+horario ([ADR 003](decisiones/003-horarios-libres.md)).
+
+- Base: `URL_RESERVAS` (en Docker Compose, `http://reservas:8003`).
+- Timeout: `TIMEOUT_RESERVAS_SEGUNDOS` (2 s por defecto), sobre el pedido
+  completo, incluida la resolución DNS.
+- Traefik no publica `/interno` (la regla del router de reservas excluye
+  `/api/reservas/interno`).
+- Las tres operaciones son **idempotentes**.
+
+### POST /interno/disponibilidades-ocupadas
+
+```json
+{"ids": [7, 8, 9]}
+```
+
+Responde `200` con los ids que tienen un turno RESERVADO o un bloqueo,
+ordenados:
+
+```json
+{"ocupadas": [8]}
+```
+
+Hasta 5000 ids; con más, `422`. Catálogo solo pregunta por los horarios que
+no empezaron.
+
+| Respuesta de reservas | Listado de catálogo |
+| --- | --- |
+| 200 | Cada horario con `libre` `true` o `false` |
+| Conexión rechazada, timeout o respuesta fuera del contrato | Sin filtro: 200 con `libre: null` en los que no empezaron. Con `solo_libres=true`: 503 |
+
+### PUT /interno/bloqueos/{id_disponibilidad}
+
+Bloquea el horario antes de borrarlo: desde ese momento reservas no acepta
+turnos sobre él.
+
+| Respuesta | Cuándo |
+| --- | --- |
+| `204 No Content` | Se bloqueó, **o ya estaba bloqueado** (idempotente). Un turno CANCELADO no impide bloquear. |
+| `409` `DISPONIBILIDAD_CON_TURNO` | El horario tiene un turno RESERVADO; no se bloquea. |
+
+El bloqueo de un horario borrado no se quita nunca: así una reserva que
+consultó a catálogo antes del borrado no puede crear el turno después.
+
+### DELETE /interno/bloqueos/{id_disponibilidad}
+
+Quita el bloqueo; responde `204` exista o no. Catálogo lo usa solo como
+compensación, cuando pidió el bloqueo pero no pudo borrar.
+
+### Cómo interpreta catálogo las respuestas al borrar
+
+| Respuesta de `PUT /interno/bloqueos/{id}` | Respuesta al cliente de `DELETE /disponibilidades/{id}` | ¿Compensa? |
+| --- | --- | --- |
+| 204 | 204 (si el borrado en catálogo funciona) | Solo si después falla el borrado |
+| 409 `DISPONIBILIDAD_CON_TURNO` | 409 | No |
+| Conexión rechazada, timeout o respuesta fuera del contrato | 503 | Sí: el bloqueo pudo haberse aplicado |
 
 ## Eventos: exchange `turnos`
 

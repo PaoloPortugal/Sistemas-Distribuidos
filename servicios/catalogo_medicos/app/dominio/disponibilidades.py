@@ -1,20 +1,25 @@
 """Reglas de negocio de las disponibilidades (franjas horarias de un profesional).
 
-Pendientes (ADR 003): marcar qué franjas están libres y borrar una franja
-dependen de los turnos, que viven en reservas.
+Qué franjas están libres y si una se puede borrar depende de los turnos, que
+viven en reservas: catálogo le pregunta (ADR 003). No existe modificar una
+franja: se borra y se crea otra.
 """
 
 import datetime
+import logging
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.clientes.reservas import ClienteReservas, DisponibilidadConTurno, ReservasNoDisponible
 from app.db.modelos import Disponibilidad, Profesional
 from app.dominio.profesionales import normalizar_email
 
 DIAS_POR_DEFECTO = 30
 DIAS_MAXIMOS = 90
+
+registro = logging.getLogger(__name__)
 
 
 class HorarioInvalido(Exception):
@@ -36,6 +41,18 @@ class FranjaSuperpuesta(Exception):
 
 
 class RangoInvalido(Exception):
+    pass
+
+
+class DisponibilidadNoEncontrada(Exception):
+    pass
+
+
+class DisponibilidadAjena(Exception):
+    """La franja es de otro profesional."""
+
+
+class FranjaYaEmpezo(Exception):
     pass
 
 
@@ -92,6 +109,101 @@ def listar_disponibilidades(
         .order_by(Disponibilidad.fecha, Disponibilidad.horario_inicio)
     )
     return list(sesion.scalars(consulta))
+
+
+def marcar_libres(
+    disponibilidades: list[Disponibilidad], reservas: ClienteReservas, ahora: datetime.datetime
+) -> list[tuple[Disponibilidad, bool | None]]:
+    """Cada franja con `libre`: no empezó y no tiene turno RESERVADO ni bloqueo.
+
+    Si reservas no responde, las que no empezaron quedan con `libre` = None
+    (no se sabe); reservas igual rechaza la reserva de una franja tomada.
+    """
+    futuras = [d.id_disponibilidad for d in disponibilidades if not _empezo(d, ahora)]
+    ocupadas: set[int] | None = set()
+    if futuras:
+        try:
+            ocupadas = reservas.ocupadas(futuras)
+        except ReservasNoDisponible as error:
+            registro.warning("No se pudo consultar a reservas (%s); franjas sin marcar", error)
+            ocupadas = None
+    marcadas = []
+    for d in disponibilidades:
+        if _empezo(d, ahora):
+            libre = False
+        elif ocupadas is None:
+            libre = None
+        else:
+            libre = d.id_disponibilidad not in ocupadas
+        marcadas.append((d, libre))
+    return marcadas
+
+
+def eliminar_disponibilidad(
+    sesion: Session,
+    reservas: ClienteReservas,
+    *,
+    id_disponibilidad: int,
+    email_profesional: str,
+    ahora: datetime.datetime,
+) -> None:
+    """Borra una franja propia que no empezó y no tiene turno RESERVADO.
+
+    Primero reservas la bloquea (y dice si tiene turno) y después se borra:
+    una reserva que consultó a catálogo antes del borrado choca con el
+    bloqueo, que queda para siempre. Si no se pudo borrar, se desbloquea. El
+    FOR UPDATE impide que dos borrados de la misma franja se crucen.
+    """
+    disponibilidad = sesion.scalar(
+        select(Disponibilidad)
+        .where(Disponibilidad.id_disponibilidad == id_disponibilidad)
+        .with_for_update()
+    )
+    if disponibilidad is None:
+        sesion.rollback()
+        raise DisponibilidadNoEncontrada
+    if disponibilidad.email_profesional != normalizar_email(email_profesional):
+        sesion.rollback()
+        raise DisponibilidadAjena
+    if _empezo(disponibilidad, ahora):
+        sesion.rollback()
+        raise FranjaYaEmpezo
+
+    try:
+        reservas.bloquear(id_disponibilidad)
+    except DisponibilidadConTurno:
+        sesion.rollback()
+        raise
+    except ReservasNoDisponible:
+        # Pudo haberse aplicado (timeout de lectura): se compensa igual.
+        _desbloquear_sin_fallar(reservas, id_disponibilidad)
+        sesion.rollback()
+        raise
+
+    sesion.delete(disponibilidad)
+    try:
+        sesion.commit()
+    except Exception:
+        sesion.rollback()
+        _desbloquear_sin_fallar(reservas, id_disponibilidad)
+        raise
+
+
+def _desbloquear_sin_fallar(reservas: ClienteReservas, id_disponibilidad: int) -> None:
+    try:
+        reservas.desbloquear(id_disponibilidad)
+    except ReservasNoDisponible as error:
+        # La franja sigue en catálogo pero no se puede reservar; repetir el
+        # borrado la destraba (bloquear es idempotente).
+        registro.error(
+            "Posible inconsistencia: la franja %s pudo quedar bloqueada en reservas sin borrarse (%s)",
+            id_disponibilidad,
+            error,
+        )
+
+
+def _empezo(disponibilidad: Disponibilidad, ahora: datetime.datetime) -> bool:
+    return datetime.datetime.combine(disponibilidad.fecha, disponibilidad.horario_inicio) <= ahora
 
 
 def resolver_rango(

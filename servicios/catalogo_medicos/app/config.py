@@ -7,6 +7,8 @@ class Configuracion(BaseSettings):
     nivel_log: str = "INFO"
     ruta_clave_publica_jwt: str = "/run/secrets/jwt_publica.pem"
     zona_horaria: str = "America/Montevideo"
+    url_reservas: str = ""
+    timeout_reservas_segundos: float = 2.0
 
 
 configuracion = Configuracion()
