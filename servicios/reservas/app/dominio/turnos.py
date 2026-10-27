@@ -24,7 +24,7 @@ from app.db.modelos import (
     EventoSaliente,
     Turno,
 )
-from app.dominio import reloj
+from app.dominio import bloqueos, reloj
 
 PLAZO_CANCELACION_PACIENTE = datetime.timedelta(hours=24)
 DIAS_POR_DEFECTO = 30
@@ -41,6 +41,10 @@ class FranjaEnElPasado(Exception):
 
 class HorarioYaReservado(Exception):
     pass
+
+
+class HorarioNoDisponible(Exception):
+    """Catálogo está borrando el horario o ya lo borró (ADR 003)."""
 
 
 class TurnoInexistente(Exception):
@@ -88,6 +92,13 @@ def reservar(
         raise ServicioNoCorresponde
     if reloj.instante(franja.fecha, franja.horario_inicio) <= ahora:
         raise FranjaEnElPasado
+
+    # Catálogo pudo empezar a borrar el horario después de responder: el
+    # bloqueo se mira en la misma transacción que el INSERT (ADR 003).
+    bloqueos.tomar_lock(sesion, franja.id_disponibilidad, exclusivo=False)
+    if bloqueos.esta_bloqueada(sesion, franja.id_disponibilidad):
+        sesion.rollback()
+        raise HorarioNoDisponible
 
     turno = Turno(
         email_paciente=normalizar_email(email_paciente),

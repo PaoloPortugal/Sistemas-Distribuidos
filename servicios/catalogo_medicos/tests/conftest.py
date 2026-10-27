@@ -18,6 +18,11 @@ from sqlalchemy import Engine, create_engine, event, text
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from app.clientes.reservas import (
+    DisponibilidadConTurno,
+    ReservasNoDisponible,
+    obtener_cliente_reservas,
+)
 from app.config import configuracion
 from app.db.modelos import ESQUEMA, Base, Especialidad, Profesional, Servicio
 from app.db.sesion import obtener_sesion
@@ -40,6 +45,34 @@ BEGIN
     SELECT RAISE(ABORT, 'ex_disponibilidad_sin_superposicion');
 END
 """
+
+
+class ReservasFalso:
+    """Reemplaza al cliente HTTP de reservas: turnos reservados y bloqueos en memoria."""
+
+    def __init__(self):
+        self.reservadas: set[int] = set()
+        self.bloqueadas: set[int] = set()
+        self.caido = False
+        self.consultas: list[list[int]] = []
+
+    def ocupadas(self, ids: list[int]) -> set[int]:
+        self.consultas.append(list(ids))
+        if self.caido:
+            raise ReservasNoDisponible("timeout")
+        return set(ids) & (self.reservadas | self.bloqueadas)
+
+    def bloquear(self, id_disponibilidad: int) -> None:
+        if self.caido:
+            raise ReservasNoDisponible("timeout")
+        if id_disponibilidad in self.reservadas:
+            raise DisponibilidadConTurno
+        self.bloqueadas.add(id_disponibilidad)
+
+    def desbloquear(self, id_disponibilidad: int) -> None:
+        if self.caido:
+            raise ReservasNoDisponible("timeout")
+        self.bloqueadas.discard(id_disponibilidad)
 
 
 def generar_par_claves() -> tuple[bytes, bytes]:
@@ -131,12 +164,18 @@ def fabrica_sesiones(motor) -> sessionmaker[Session]:
 
 
 @pytest.fixture
-def cliente(fabrica_sesiones) -> Iterator[TestClient]:
+def reservas() -> ReservasFalso:
+    return ReservasFalso()
+
+
+@pytest.fixture
+def cliente(fabrica_sesiones, reservas) -> Iterator[TestClient]:
     def sesion_de_prueba() -> Iterator[Session]:
         with fabrica_sesiones() as sesion:
             yield sesion
 
     app.dependency_overrides[obtener_sesion] = sesion_de_prueba
+    app.dependency_overrides[obtener_cliente_reservas] = lambda: reservas
     app.dependency_overrides[reloj.ahora] = lambda: AHORA
     with TestClient(app) as cliente:
         yield cliente

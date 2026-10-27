@@ -35,7 +35,10 @@ CATALOGO_NO_DISPONIBLE = "El catálogo no está disponible. Intentá de nuevo m�
     responses=RESPUESTAS_PACIENTE
     | {
         404: {"model": Error, "description": "La disponibilidad o el servicio no existen"},
-        409: {"model": Error, "description": "El horario ya está reservado"},
+        409: {
+            "model": Error,
+            "description": "El horario ya está reservado, o el profesional lo está borrando",
+        },
         422: {"description": "El servicio no corresponde, o la franja ya pasó"},
         503: {"model": Error, "description": "Catálogo no disponible; no se creó nada"},
     },
@@ -72,6 +75,10 @@ def reservar(
         ) from None
     except turnos.HorarioYaReservado:
         raise HTTPException(status.HTTP_409_CONFLICT, "El horario ya está reservado") from None
+    except turnos.HorarioNoDisponible:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, "El horario no está disponible en este momento"
+        ) from None
 
 
 @router.get(
