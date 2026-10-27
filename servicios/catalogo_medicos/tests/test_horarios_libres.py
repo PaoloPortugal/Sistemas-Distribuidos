@@ -261,6 +261,19 @@ def test_si_el_bloqueo_pudo_aplicarse_se_compensa(
     assert reservas.bloqueadas == set()
 
 
+def test_no_existe_modificar_una_franja(cliente, como_gomez, ids, fabrica_sesiones):
+    """Modificar es borrar y crear (ADR 003): no hay PATCH."""
+    respuesta = cliente.patch(
+        f"/disponibilidades/{ids['manana_9']}", json=franja(inicio="11:00", fin="11:30"),
+        headers=como_gomez,
+    )
+
+    assert respuesta.status_code == 405
+    assert franjas_en_base(fabrica_sesiones) == [
+        (GOMEZ, "2026-11-03", "09:00"), (GOMEZ, "2026-11-03", "10:00")
+    ]
+
+
 def test_borrar_dos_veces_la_segunda_responde_404(cliente, como_gomez, ids):
     assert cliente.delete(f"/disponibilidades/{ids['manana_9']}", headers=como_gomez).status_code == 204
 

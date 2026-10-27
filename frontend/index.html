@@ -15,9 +15,10 @@
   </head>
   <body>
     <div id="root"></div>
-    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
-    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- Versiones fijas, servidas desde el repo (frontend/vendor/), sin depender de un CDN. -->
+    <script src="/vendor/react-18.3.1.production.min.js"></script>
+    <script src="/vendor/react-dom-18.3.1.production.min.js"></script>
+    <script src="/vendor/babel-standalone-7.24.7.min.js"></script>
     <script type="text/babel" src="/js/app.jsx"></script>
   </body>
 </html>

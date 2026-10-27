@@ -7,9 +7,10 @@ const API = {
   profile: "/api/usuarios/yo",
   professionals: "/api/catalogo-medicos/profesionales",
   services: (specialtyId) => `/api/catalogo-medicos/especialidades/${specialtyId}/servicios`,
-  availability: (email, desde, hasta) => `/api/catalogo-medicos/profesionales/${encodeURIComponent(email)}/disponibilidades?desde=${desde}&hasta=${hasta}`,
+  // El paciente solo ve los horarios libres (ADR 003); 503 si reservas no responde.
+  freeAvailability: (email, desde, hasta) => `/api/catalogo-medicos/profesionales/${encodeURIComponent(email)}/disponibilidades?desde=${desde}&hasta=${hasta}&solo_libres=true`,
   ownAvailability: (desde, hasta) => `/api/catalogo-medicos/mis-disponibilidades?desde=${desde}&hasta=${hasta}`,
-  updateAvailability: (id) => `/api/catalogo-medicos/disponibilidades/${id}`,
+  createAvailability: "/api/catalogo-medicos/disponibilidades",
   deleteAvailability: (id) => `/api/catalogo-medicos/disponibilidades/${id}`,
   reservations: "/api/reservas/mis-turnos",
   agenda: (desde, hasta) => `/api/reservas/agenda?desde=${desde}&hasta=${hasta}`,
@@ -41,7 +42,8 @@ function Icon({ name, size = 20 }) {
 }
 
 function initials(user) { return `${user?.nombre?.[0] || ""}${user?.apellido?.[0] || ""}`.toUpperCase(); }
-function isoDate(date) { return date.toISOString().slice(0, 10); }
+// Fecha local (AAAA-MM-DD). toISOString usa UTC: después de las 21 h en Montevideo daría mañana.
+function isoDate(date) { return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`; }
 function todayPlus(days) { const date = new Date(); date.setDate(date.getDate() + days); return date; }
 function displayDate(value, options = { weekday: "short", day: "numeric", month: "short" }) { return new Intl.DateTimeFormat("es-UY", options).format(new Date(`${value}T12:00:00`)); }
 
@@ -50,7 +52,9 @@ async function request(url, options = {}) {
   const response = await fetch(url, { ...options, headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}), ...options.headers } });
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
-    throw new Error(body.detail || "No se pudo completar la solicitud.");
+    const error = new Error(typeof body.detail === "string" ? body.detail : "No se pudo completar la solicitud.");
+    error.status = response.status;
+    throw error;
   }
   return response.status === 204 ? null : response.json();
 }
@@ -99,7 +103,7 @@ function Field({ label, type = "text", value, onChange, required = false, minLen
 
 function Topbar({ user, page, setPage, onLogout }) {
   const [menuOpen, setMenuOpen] = useState(false);
-  return <header className="topbar"><div className="top-actions"><div className="profile-wrapper"><button className="avatar-button" onClick={() => setMenuOpen(!menuOpen)}>{initials(user)}</button>{menuOpen && <div className="profile-menu"><p><strong>{user.nombre} {user.apellido}</strong><br /><span className="muted">{user.email}</span></p><button onClick={() => { setMenuOpen(false); setPage("profile"); }}>Ver perfil</button><button onClick={onLogout}><Icon name="logout" size={15} /> Cerrar sesión</button></div>}</div><div className="icon-pill"><button className={`icon-button ${page === "home" ? "active" : ""}`} onClick={() => setPage("home")}><Icon name="home" /></button><button className={`icon-button ${page === "notifications" ? "active" : ""}`} onClick={() => setPage("notifications")}><Icon name="bell" /><span className="notification-dot" /></button></div></div></header>;
+  return <header className="topbar"><div className="top-actions"><div className="profile-wrapper"><button className="avatar-button" onClick={() => setMenuOpen(!menuOpen)}>{initials(user)}</button>{menuOpen && <div className="profile-menu"><p><strong>{user.nombre} {user.apellido}</strong><br /><span className="muted">{user.email}</span></p><button onClick={() => { setMenuOpen(false); setPage("profile"); }}>Ver perfil</button><button onClick={onLogout}><Icon name="logout" size={15} /> Cerrar sesión</button></div>}</div><div className="icon-pill"><button className={`icon-button ${page === "home" ? "active" : ""}`} onClick={() => setPage("home")}><Icon name="home" /></button><button className={`icon-button ${page === "notifications" ? "active" : ""}`} onClick={() => setPage("notifications")}><Icon name="bell" /></button></div></div></header>;
 }
 
 function Sidebar({ page, setPage, professional }) {
@@ -117,7 +121,8 @@ function Hero({ user, professional, setPage }) {
 
 function ReservationCard({ reservation, details, onCancel, professional = false }) {
   const cancelled = reservation.estado !== "RESERVADO";
-  const patientName = [reservation.nombre_paciente, reservation.apellido_paciente].filter(Boolean).join(" ") || reservation.paciente?.nombre_completo || "Paciente";
+  // Sin nombre (usuarios no respondió, ADR 009): se muestra el email del paciente.
+  const patientName = [reservation.nombre_paciente, reservation.apellido_paciente].filter(Boolean).join(" ") || reservation.email_paciente || "Paciente";
   const title = professional ? patientName : details?.serviceName || details?.specialty || "Turno médico";
   const subtitle = professional ? `${reservation.horario_inicio.slice(0, 5)} - ${reservation.horario_fin.slice(0, 5)}` : `${details?.serviceName && details?.specialty ? `${details.specialty} · ` : ""}${reservation.horario_inicio.slice(0, 5)} - ${reservation.horario_fin.slice(0, 5)}`;
   return <article className={`card reservation-card ${cancelled ? "reservation-cancelled" : ""}`}><div className="reservation-top"><div><h3>{title}</h3><p className="muted">{subtitle}</p></div><div className="date-badge">{displayDate(reservation.fecha)}</div></div><div className="reservation-top"><span className={`status ${cancelled ? "cancelled" : ""}`}>{cancelled ? "CANCELADO" : "CONFIRMADO"}</span>{!cancelled && onCancel && <button className="link-button" onClick={() => onCancel(reservation.id_turno)}>Cancelar</button>}</div></article>;
@@ -130,10 +135,18 @@ function PatientProfessionals({ professionals, reservations, onReserve }) {
 }
 
 function ProfessionalCard({ professional, reservations, isOpen, onToggle, onReserve }) {
-  const [availability, setAvailability] = useState([]); const [services, setServices] = useState([]); const [selectedService, setSelectedService] = useState(""); const [selectedDate, setSelectedDate] = useState(""); const [loading, setLoading] = useState(false);
-  useEffect(() => { if (!isOpen) return; const start = new Date(); const end = todayPlus(30); setLoading(true); Promise.all([request(API.availability(professional.email, isoDate(start), isoDate(end))), request(API.services(professional.id_especialidad))]).then(([items, availableServices]) => { setAvailability(items); setSelectedDate(items[0]?.fecha || isoDate(start)); setServices(availableServices); setSelectedService(String(availableServices[0]?.id_servicio || "")); }).catch(() => setAvailability([])).finally(() => setLoading(false)); }, [isOpen, professional.email]);
-  const dates = [...new Set(availability.map((item) => item.fecha))]; const slots = availability.filter((item) => item.fecha === selectedDate); const booked = new Set(reservations.filter((item) => item.email_profesional === professional.email && item.estado === "RESERVADO").map((item) => item.id_disponibilidad));
-  return <article className="card professional-card"><div className="professional-header"><div className="professional-main"><div className="professional-avatar">{initials(professional)}</div><div><h3>Dr. {professional.nombre} {professional.apellido}</h3></div><span className="specialty-pill">{professional.especialidad}</span></div><button className="clock-button" title="Ver horarios" onClick={onToggle}><Icon name="clock" /></button></div>{isOpen && <div className="availability-panel">{loading ? <p className="muted">Cargando horarios...</p> : dates.length ? <><label className="availability-label">Elegí un servicio</label><select className="service-select" value={selectedService} onChange={(event) => setSelectedService(event.target.value)}>{services.map((service) => <option key={service.id_servicio} value={service.id_servicio}>{service.nombre}</option>)}</select><label className="availability-label day-label">Elegí un día</label><div className="date-picker">{dates.map((date) => <button key={date} className={`date-option ${date === selectedDate ? "selected" : ""}`} onClick={() => setSelectedDate(date)}>{displayDate(date)}</button>)}</div><strong>Horarios disponibles</strong><div className="time-grid">{slots.map((slot) => <button key={slot.id_disponibilidad} className={`time-slot ${booked.has(slot.id_disponibilidad) ? "booked" : ""}`} disabled={booked.has(slot.id_disponibilidad)} onClick={() => onReserve(slot, Number(selectedService), professional, services.find((service) => service.id_servicio === Number(selectedService)))}>{slot.horario_inicio.slice(0, 5)}</button>)}</div></> : <p className="muted">Este profesional todavía no tiene horarios publicados.</p>}</div>}</article>;
+  const [availability, setAvailability] = useState([]); const [services, setServices] = useState([]); const [selectedService, setSelectedService] = useState(""); const [selectedDate, setSelectedDate] = useState(""); const [loading, setLoading] = useState(false); const [notice, setNotice] = useState("");
+  function load() {
+    const start = new Date(); const end = todayPlus(30); setLoading(true); setNotice("");
+    Promise.all([request(API.freeAvailability(professional.email, isoDate(start), isoDate(end))), request(API.services(professional.id_especialidad))])
+      .then(([items, availableServices]) => { setAvailability(items); setSelectedDate(items[0]?.fecha || isoDate(start)); setServices(availableServices); setSelectedService(String(availableServices[0]?.id_servicio || "")); })
+      .catch((err) => { setAvailability([]); setNotice(err.status === 503 ? "En este momento no podemos confirmar qué horarios están libres. Probá de nuevo en unos minutos." : err.message); })
+      .finally(() => setLoading(false));
+  }
+  // Al reservar, el horario deja de estar libre: se vuelve a pedir la lista.
+  useEffect(() => { if (isOpen) load(); }, [isOpen, professional.email, reservations]);
+  const dates = [...new Set(availability.map((item) => item.fecha))]; const slots = availability.filter((item) => item.fecha === selectedDate);
+  return <article className="card professional-card"><div className="professional-header"><div className="professional-main"><div className="professional-avatar">{initials(professional)}</div><div><h3>Dr. {professional.nombre} {professional.apellido}</h3></div><span className="specialty-pill">{professional.especialidad}</span></div><button className="clock-button" title="Ver horarios" onClick={onToggle}><Icon name="clock" /></button></div>{isOpen && <div className="availability-panel">{loading ? <p className="muted">Cargando horarios...</p> : notice ? <div className="form-error">{notice} <button className="link-button" onClick={load}>Reintentar</button></div> : dates.length ? <><label className="availability-label">Elegí un servicio</label><select className="service-select" value={selectedService} onChange={(event) => setSelectedService(event.target.value)}>{services.map((service) => <option key={service.id_servicio} value={service.id_servicio}>{service.nombre}</option>)}</select><label className="availability-label day-label">Elegí un día</label><div className="date-picker">{dates.map((date) => <button key={date} className={`date-option ${date === selectedDate ? "selected" : ""}`} onClick={() => setSelectedDate(date)}>{displayDate(date)}</button>)}</div><strong>Horarios disponibles</strong><div className="time-grid">{slots.map((slot) => <button key={slot.id_disponibilidad} className="time-slot" onClick={() => onReserve(slot, Number(selectedService), professional, services.find((service) => service.id_servicio === Number(selectedService)))}>{slot.horario_inicio.slice(0, 5)}</button>)}</div></> : <p className="muted">Este profesional no tiene horarios libres en los próximos 30 días.</p>}</div>}</article>;
 }
 
 function ProfessionalHome({ user, agenda, details, setPage, onCancel }) {
@@ -155,7 +168,8 @@ function Schedule({ availability, agenda, onCreate, onUpdate, onDelete }) {
     const duration = Number(form.duracion);
     const [endHours, endMinutes] = form.horario_fin.split(":").map(Number);
     const end = endHours * 60 + endMinutes;
-    if (duration <= 0 || end <= start) {
+    // Al modificar no se muestra la hora de fin: sale de la duración.
+    if (duration <= 0 || (!editing && end <= start)) {
       window.alert("La hora de fin debe ser posterior al inicio y la duración debe ser mayor a cero.");
       return;
     }
@@ -173,46 +187,58 @@ function Schedule({ availability, agenda, onCreate, onUpdate, onDelete }) {
   return <><PageHeader kicker="Tu agenda" title="Horarios" text="Seleccioná un día para revisar y administrar tus disponibilidades." /><div className="schedule-toolbar"><button className="primary-button" onClick={openNew}><Icon name="plus" size={17} /> Nuevo horario</button></div><div className="calendar-strip">{dates.map((date) => <button key={date} className={`calendar-day ${date === selectedDate ? "selected" : ""}`} onClick={() => changeDate(date)}><strong>{displayDate(date, { weekday: "short" })}</strong><span>{displayDate(date, { day: "numeric", month: "short" })}</span></button>)}</div><div className="schedule-layout"><section className="card schedule-list"><div className="section-heading"><div><h2>{displayDate(selectedDate, { weekday: "long", day: "numeric", month: "long" })}</h2><p>{slots.length} horarios disponibles</p></div></div>{slots.length ? slots.map((slot) => <div className={`schedule-row ${booked.has(slot.id_disponibilidad) ? "booked-row" : ""}`} key={slot.id_disponibilidad}><div className="schedule-time"><Icon name="clock" size={17} /><strong>{slot.horario_inicio.slice(0, 5)} - {slot.horario_fin.slice(0, 5)}</strong></div><span className={`schedule-state ${booked.has(slot.id_disponibilidad) ? "booked" : ""}`}>{booked.has(slot.id_disponibilidad) ? "Agendado" : "Libre"}</span><div className="schedule-actions"><button title="Modificar" disabled={booked.has(slot.id_disponibilidad)} onClick={() => openEdit(slot)}><Icon name="edit" size={16} /></button><button title="Eliminar" disabled={booked.has(slot.id_disponibilidad)} onClick={() => { if (window.confirm("¿Querés eliminar este horario?")) onDelete(slot.id_disponibilidad); }}><Icon name="trash" size={16} /></button></div></div>) : <Empty text="No hay horarios para este día." action="Agregar horario" onAction={openNew} />}</section>{(editing || form.fecha === selectedDate) && <form className="card schedule-form" onSubmit={submit}><h2>{editing ? "Modificar horario" : "Nuevo horario"}</h2><p className="muted">Definí el día, el rango horario y la duración de cada consulta.</p><Field label="Día" type="date" value={form.fecha} onChange={(event) => changeDate(event.target.value)} required /><Field label="Hora de inicio" type="time" value={form.horario_inicio} onChange={(event) => setForm({ ...form, horario_inicio: event.target.value })} required />{!editing && <Field label="Hora de fin" type="time" value={form.horario_fin} onChange={(event) => setForm({ ...form, horario_fin: event.target.value })} required />}<Field label="Duración (minutos)" type="number" min="1" value={form.duracion} onChange={(event) => setForm({ ...form, duracion: event.target.value })} required /><div className="form-actions"><button type="button" className="secondary-button" onClick={() => setEditing(null)}>Cancelar</button><button className="primary-button">{editing ? "Guardar cambios" : "Crear horarios"}</button></div></form>}</div></>;
 }
 
-function Notifications() { return <><PageHeader kicker="Centro de actividad" title="Notificaciones" text="Acá vas a encontrar las novedades sobre tus turnos." /><div className="notification-list"><Empty text="Todavía no tenés notificaciones." /></div></>; }
+function Notifications() { return <><PageHeader kicker="Centro de actividad" title="Notificaciones" text="Los avisos de tus turnos llegan por mail." /><div className="notification-list"><article className="card empty-state"><Icon name="bell" size={28} /><p>Cada vez que se confirma o se cancela un turno, el paciente y el profesional reciben un mail con la fecha y el horario.</p><p className="muted">En este entorno de desarrollo los mails no salen a Internet: se pueden ver en Mailpit, en <a href="http://localhost:8025" target="_blank" rel="noopener noreferrer">http://localhost:8025</a>.</p></article></div></>; }
 function Profile({ user, onLogout }) { const professional = user.tipo === "PROFESIONAL"; return <><PageHeader kicker="Tu cuenta" title="Mi perfil" text={`Información asociada a tu cuenta de ${professional ? "profesional" : "paciente"}.`} /><article className="card profile-card"><div className="profile-header"><div className="profile-avatar">{initials(user)}</div><div><h2>{user.nombre} {user.apellido}</h2><p className="muted">{professional ? "Profesional" : "Paciente"}</p></div></div><div className="profile-fields"><div className="profile-field"><label>Nombre completo</label><strong>{user.nombre} {user.apellido}</strong></div><div className="profile-field"><label>Email</label><strong>{user.email}</strong></div>{!professional && <><div className="profile-field"><label>Documento</label><strong>{user.paciente?.documento || "No informado"}</strong></div><div className="profile-field"><label>Teléfono</label><strong>{user.paciente?.telefono || "No informado"}</strong></div></>}</div><button className="secondary-button danger-button" onClick={onLogout}><Icon name="logout" size={16} /> Cerrar sesión</button></article></>; }
 function PageHeader({ kicker, title, text }) { return <section className="page-header"><span className="page-kicker">{kicker}</span><h1>{title}</h1><p>{text}</p></section>; }
 function Empty({ text, action, onAction }) { return <div className="card empty-state"><Icon name="calendar" size={28} /><p>{text}</p>{action && <button className="secondary-button" onClick={onAction}>{action}</button>}</div>; }
 
 function App() {
-  const [user, setUser] = useState(null); const [page, setPage] = useState("home"); const [reservations, setReservations] = useState([]); const [professionals, setProfessionals] = useState([]); const [availability, setAvailability] = useState([]); const [agenda, setAgenda] = useState([]); const [details, setDetails] = useState({}); const [toast, setToast] = useState(""); const [loading, setLoading] = useState(true);
+  const [user, setUser] = useState(null); const [page, setPage] = useState("home"); const [reservations, setReservations] = useState([]); const [professionals, setProfessionals] = useState([]); const [availability, setAvailability] = useState([]); const [agenda, setAgenda] = useState([]); const [details, setDetails] = useState({}); const [toast, setToast] = useState(""); const [loading, setLoading] = useState(true); const [loadError, setLoadError] = useState("");
   const professional = user?.tipo === "PROFESIONAL";
   const range = useMemo(() => ({ desde: isoDate(new Date()), hasta: isoDate(todayPlus(30)) }), []);
   useEffect(() => {
     if (!localStorage.getItem("turnos_token")) { setLoading(false); return; }
+    // Cada lista se carga por separado: si un servicio no responde, el resto de la pantalla funciona.
+    function load(promise, setter, message) { return promise.then(setter).catch(() => showToast(message)); }
     request(API.profile).then((profile) => {
       setUser(profile);
       if (profile.tipo === "PROFESIONAL") {
         return Promise.all([
-          request(API.agenda(range.desde, range.hasta)),
-          request(API.ownAvailability(range.desde, range.hasta)),
-        ]).then(([ownAgenda, ownAvailability]) => {
-          setAgenda(ownAgenda);
-          setAvailability(ownAvailability);
-        });
+          load(request(API.agenda(range.desde, range.hasta)), setAgenda, "No se pudo cargar la agenda. Probá de nuevo en unos minutos."),
+          load(request(API.ownAvailability(range.desde, range.hasta)), setAvailability, "No se pudieron cargar tus horarios. Probá de nuevo en unos minutos."),
+        ]);
       }
-      return Promise.all([request(API.reservations), request(API.professionals)]).then(([ownReservations, providers]) => {
-        setReservations(ownReservations);
-        setProfessionals(providers);
-      });
-    }).catch(() => localStorage.removeItem("turnos_token")).finally(() => setLoading(false));
+      return Promise.all([
+        load(request(API.reservations), setReservations, "No se pudieron cargar tus reservas. Probá de nuevo en unos minutos."),
+        load(request(API.professionals), setProfessionals, "No se pudo cargar la lista de profesionales. Probá de nuevo en unos minutos."),
+      ]);
+    }).catch((err) => {
+      // Solo un token rechazado cierra la sesión; si usuarios no responde, se ofrece reintentar.
+      if (err.status === 401) localStorage.removeItem("turnos_token");
+      else setLoadError("No pudimos cargar tu cuenta. Probá de nuevo en unos minutos.");
+    }).finally(() => setLoading(false));
   }, []);
   useEffect(() => { if (!user || professional || !professionals.length) return; Promise.all(professionals.map((provider) => request(API.services(provider.id_especialidad)).then((services) => ({ provider, services })))).then((catalogs) => { const byProfessional = Object.fromEntries(catalogs.map(({ provider, services }) => [provider.email, { specialty: provider.especialidad, services }])); setDetails(Object.fromEntries(reservations.map((reservation) => { const catalog = byProfessional[reservation.email_profesional]; const service = catalog?.services.find((item) => item.id_servicio === reservation.id_servicio); return [reservation.id_turno, { specialty: catalog?.specialty, serviceName: service?.nombre }]; }))); }); }, [user, professional, professionals, reservations]);
   function logout() { localStorage.removeItem("turnos_token"); setUser(null); setPage("home"); }
   function showToast(message) { setToast(message); window.setTimeout(() => setToast(""), 3500); }
   async function refreshProfessional() { setAvailability(await request(API.ownAvailability(range.desde, range.hasta))); setAgenda(await request(API.agenda(range.desde, range.hasta))); }
-  async function createAvailability(data) { try { await request("/api/catalogo-medicos/disponibilidades", { method: "POST", body: JSON.stringify(data) }); await refreshProfessional(); showToast("Horario creado."); } catch (err) { showToast(err.message); } }
-  async function updateAvailability(id, data) { try { await request(API.updateAvailability(id), { method: "PATCH", body: JSON.stringify(data) }); await refreshProfessional(); showToast("Horario actualizado."); } catch (err) { showToast(err.message); } }
+  async function createAvailability(data) { try { await request(API.createAvailability, { method: "POST", body: JSON.stringify(data) }); await refreshProfessional(); showToast("Horario creado."); } catch (err) { showToast(err.message); } }
+  // Modificar un horario es eliminarlo y crear otro (ADR 003). Si no se pudo
+  // eliminar (por ejemplo, 409: tiene un turno reservado), no se crea el nuevo.
+  async function replaceAvailability(id, data) {
+    try { await request(API.deleteAvailability(id), { method: "DELETE" }); }
+    catch (err) { showToast(`No se pudo modificar el horario: ${err.message}`); await refreshProfessional(); return; }
+    try { await request(API.createAvailability, { method: "POST", body: JSON.stringify(data) }); showToast("Horario modificado."); }
+    catch (err) { showToast(`Se eliminó el horario anterior, pero no se pudo crear el nuevo: ${err.message}`); }
+    await refreshProfessional();
+  }
   async function deleteAvailability(id) { try { await request(API.deleteAvailability(id), { method: "DELETE" }); await refreshProfessional(); showToast("Horario eliminado."); } catch (err) { showToast(err.message); } }
   async function cancel(id) { if (!window.confirm("¿Querés confirmar la cancelación de este turno?")) return; try { await request(API.cancel(id), { method: "POST", body: JSON.stringify({}) }); if (professional) await refreshProfessional(); else setReservations(await request(API.reservations)); showToast("Turno cancelado."); } catch (err) { showToast(err.message); } }
   async function reserve(slot, serviceId, provider, service) { try { await request(API.reserve, { method: "POST", body: JSON.stringify({ id_disponibilidad: slot.id_disponibilidad, id_servicio: serviceId }) }); const updated = await request(API.reservations); setReservations(updated); setDetails((current) => ({ ...current, [updated.find((item) => item.id_disponibilidad === slot.id_disponibilidad)?.id_turno]: { specialty: provider.especialidad, serviceName: service?.nombre } })); showToast("Turno reservado correctamente."); } catch (err) { showToast(err.message); } }
   if (loading) return <div className="login-screen"><p className="muted">Cargando tu cuenta...</p></div>;
+  if (!user && loadError) return <div className="login-screen"><div className="login-card"><p className="form-error">{loadError}</p><button className="primary-button full-width" onClick={() => window.location.reload()}>Reintentar</button></div></div>;
   if (!user) return <Login onLogin={() => window.location.reload()} />;
-  const content = professional ? (page === "home" ? <ProfessionalHome user={user} agenda={agenda} details={details} setPage={setPage} onCancel={cancel} /> : page === "schedule" ? <Schedule availability={availability} agenda={agenda} onCreate={createAvailability} onUpdate={updateAvailability} onDelete={deleteAvailability} /> : page === "notifications" ? <Notifications /> : <Profile user={user} onLogout={logout} />) : (page === "home" ? <PatientHome user={user} reservations={reservations} details={details} setPage={setPage} onCancel={cancel} /> : page === "professionals" ? <PatientProfessionals professionals={professionals} reservations={reservations} onReserve={reserve} /> : page === "notifications" ? <Notifications /> : <Profile user={user} onLogout={logout} />);
+  const content = professional ? (page === "home" ? <ProfessionalHome user={user} agenda={agenda} details={details} setPage={setPage} onCancel={cancel} /> : page === "schedule" ? <Schedule availability={availability} agenda={agenda} onCreate={createAvailability} onUpdate={replaceAvailability} onDelete={deleteAvailability} /> : page === "notifications" ? <Notifications /> : <Profile user={user} onLogout={logout} />) : (page === "home" ? <PatientHome user={user} reservations={reservations} details={details} setPage={setPage} onCancel={cancel} /> : page === "professionals" ? <PatientProfessionals professionals={professionals} reservations={reservations} onReserve={reserve} /> : page === "notifications" ? <Notifications /> : <Profile user={user} onLogout={logout} />);
   return <div className={`app-shell ${professional ? "professional-theme" : ""}`}><Sidebar page={page} setPage={setPage} professional={professional} /><div className="main-area"><Topbar user={user} page={page} setPage={setPage} onLogout={logout} /><main className="content">{content}</main><footer className="site-footer">Proyecto Sistemas Distribuidos 2026 - Juan Martín Berglavaz, María Paz Correa, Ivana Dervaric, Paolo Portugal</footer></div>{toast && <div className="toast">{toast}</div>}</div>;
 }
 

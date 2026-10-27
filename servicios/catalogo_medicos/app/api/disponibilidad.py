@@ -152,54 +152,6 @@ def eliminar(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@router.patch(
-    "/disponibilidades/{id_disponibilidad}",
-    response_model=DisponibilidadPublica,
-    responses=RESPUESTAS_PROFESIONAL
-    | {
-        404: {"model": Error, "description": "La franja no existe"},
-        409: {"model": Error, "description": "Se superpone con otra franja"},
-        422: {"model": Error, "description": "La franja ya empezó o el horario es inválido"},
-    },
-)
-def modificar(
-    id_disponibilidad: int,
-    datos: DatosDisponibilidad,
-    profesional: ProfesionalActual,
-    sesion: SesionBD,
-    ahora: Ahora,
-):
-    try:
-        return disponibilidades.modificar_disponibilidad(
-            sesion,
-            id_disponibilidad=id_disponibilidad,
-            email_profesional=profesional.email,
-            ahora=ahora,
-            **datos.model_dump(),
-        )
-    except disponibilidades.DisponibilidadNoEncontrada:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "La franja no existe") from None
-    except disponibilidades.DisponibilidadAjena:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "La franja no es tuya") from None
-    except disponibilidades.HorarioInvalido:
-        raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_CONTENT,
-            "El horario de inicio tiene que ser anterior al de fin",
-        ) from None
-    except disponibilidades.FranjaEnElPasado:
-        raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_CONTENT,
-            "No se pueden crear franjas en el pasado",
-        ) from None
-    except disponibilidades.FranjaSuperpuesta as error:
-        existente = error.existente
-        raise HTTPException(
-            status.HTTP_409_CONFLICT,
-            f"Se superpone con la franja del {existente.fecha:%Y-%m-%d} de "
-            f"{existente.horario_inicio:%H:%M} a {existente.horario_fin:%H:%M}",
-        ) from None
-
-
 @router.get(
     "/mis-disponibilidades",
     response_model=list[DisponibilidadConEstado],

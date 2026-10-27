@@ -124,6 +124,15 @@ def obtener_usuario(sesion: Session, email: str) -> Usuario | None:
     return sesion.scalar(consulta)
 
 
+def usuarios_por_email(sesion: Session, emails: list[str]) -> list[Usuario]:
+    """Los usuarios que existen de esa lista (para el endpoint interno de reservas)."""
+    normalizados = {normalizar_email(email) for email in emails}
+    if not normalizados:
+        return []
+    consulta = select(Usuario).where(Usuario.email.in_(normalizados)).order_by(Usuario.email)
+    return list(sesion.scalars(consulta))
+
+
 def _nuevo_usuario(
     email: str, contrasena: str, nombre: str, apellido: str, tipo: str
 ) -> Usuario:
