@@ -49,12 +49,9 @@ reserva.
 
 ## Costo y consecuencia
 
-- **La copia puede quedar desactualizada si una franja cambia.** Hoy no existe
-  editar ni borrar disponibilidades, así que no puede pasar.
-- **Si algún día se puede editar una franja, editar una franja con un turno
-  RESERVADO tiene que estar prohibido.** Es la misma lógica que el
-  `ON DELETE RESTRICT` de `TURNO.id_disponibilidad` en el modelo relacional:
-  el turno ya se le comunicó al paciente con esa fecha y ese horario. Para
-  cambiarlo, se cancela el turno (con su notificación) y se reserva otro.
-  Cómo sabe catálogo si una franja tiene turno es parte del ADR 003.
-- Una franja sin turnos sí se podría editar sin afectar ninguna copia.
+- **La copia no puede quedar desactualizada:** una franja no se edita (se
+  borra y se crea otra, ADR 003), y una franja con un turno RESERVADO no se
+  puede borrar. El turno ya se le comunicó al paciente con esa fecha y ese
+  horario; para cambiarlo, se cancela (con su notificación) y se reserva otro.
+- Si se borra una franja que solo tenía turnos CANCELADO, esos turnos
+  conservan su copia: el historial no depende de que la franja exista.

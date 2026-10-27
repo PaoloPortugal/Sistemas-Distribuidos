@@ -123,3 +123,18 @@ class EventoSaliente(Base):
     payload: Mapped[dict] = mapped_column(JSON().with_variant(JSONB(), "postgresql"))
     creado_en: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True))
     publicado_en: Mapped[datetime.datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class DisponibilidadBloqueada(Base):
+    """Horarios que catálogo está borrando o ya borró (ADR 003): no se reservan.
+
+    Tabla técnica, fuera del MER. Catálogo bloquea antes de borrar y solo
+    desbloquea si no pudo borrar; el bloqueo de un horario borrado queda para
+    siempre, así una reserva que consultó a catálogo antes del borrado no
+    puede crear un turno sobre un horario que ya no existe.
+    """
+
+    __tablename__ = "disponibilidad_bloqueada"
+
+    id_disponibilidad: Mapped[int] = mapped_column(primary_key=True, autoincrement=False)
+    bloqueada_en: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True))

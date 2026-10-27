@@ -2,7 +2,7 @@
 
 import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class EspecialidadPublica(BaseModel):
@@ -46,6 +46,12 @@ class DisponibilidadPublica(BaseModel):
     fecha: datetime.date
     horario_inicio: datetime.time
     horario_fin: datetime.time
+
+
+class DisponibilidadConEstado(DisponibilidadPublica):
+    libre: bool | None = Field(
+        description="No empezó y no tiene turno reservado. null si reservas no respondió."
+    )
 
 
 class Error(BaseModel):
