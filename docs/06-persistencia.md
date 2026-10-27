@@ -17,7 +17,7 @@ persisten entre reinicios en el volumen `datos_postgres`.
 | Usuarios | `usuarios` | USUARIO, PACIENTE | `alembic_version` |
 | Catálogo | `catalogo_medicos` | ESPECIALIDAD, PROFESIONAL, SERVICIO, DISPONIBILIDAD | `alembic_version` |
 | Reservas | `reservas` | TURNO | `evento_saliente` (outbox, [ADR 005](decisiones/005-outbox-eventos-turno.md)), `alembic_version` |
-| Notificaciones | `notificaciones` | NOTIFICACION | — |
+| Notificaciones | `notificaciones` | NOTIFICACION | `evento_procesado` (eventos ya consumidos), `envio_mail` (datos y reintentos de cada mail), `alembic_version` ([ADR 008](decisiones/008-notificaciones.md)) |
 
 El script `infra/postgres/init/01-esquemas.sh` crea los esquemas y usuarios, y
 `02-extensiones.sh` crea la extensión `btree_gist`. Los dos corren solo al
@@ -32,7 +32,8 @@ inicializar un volumen vacío.
 | Inicio anterior al fin | `CHECK (horario_inicio < horario_fin)` |
 | Datos de cancelación solo en turnos cancelados | `CHECK` sobre estado, fecha_cancelacion y cancelado_por |
 | Cancelación posterior a la creación | `CHECK (fecha_cancelacion >= fecha_creacion)` |
-| Dominios de tipo, estado y cancelado_por | `CHECK ... IN (...)` |
+| Dominios de tipo, estado, cancelado_por, estado_notificacion y destinatario | `CHECK ... IN (...)` |
+| Una notificación por turno, tipo y destinatario | `UNIQUE (id_turno, tipo, destinatario)` en NOTIFICACION |
 | Emails en minúsculas | `CHECK (email = lower(email))` en USUARIO, PROFESIONAL y TURNO |
 | Claves candidatas | `UNIQUE` en documento, matrícula, nombre de especialidad, (especialidad, nombre) del servicio y (profesional, fecha, inicio) del horario |
 | FK dentro de un mismo servicio | `FOREIGN KEY` con `CASCADE` o `RESTRICT` según el modelo relacional |
@@ -62,6 +63,7 @@ servicios).
 | Usuarios | `0001` USUARIO y PACIENTE |
 | Catálogo | `0001` tablas, `0002` datos iniciales, `0003` nombre y apellido en PROFESIONAL |
 | Reservas | `0001` TURNO y outbox |
+| Notificaciones | NOTIFICACION, `evento_procesado` y `envio_mail` |
 
-<!-- Pendiente: tablas de notificaciones (NOTIFICACION y sus tablas técnicas)
-cuando se implemente el servicio. -->
+El publicador de Reservas no corre migraciones: si las tablas todavía no
+existen, espera y reintenta.

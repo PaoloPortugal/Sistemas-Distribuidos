@@ -62,16 +62,29 @@ Servicio: **Reservas** (`/api/reservas`).
 Al cancelar, el horario vuelve a quedar disponible y otro paciente lo puede
 reservar.
 
+## Notificaciones
+
+Cada reserva y cada cancelación generan un mail al paciente y otro al
+profesional, con la fecha, el horario y, en las cancelaciones, quién canceló
+y el motivo. En desarrollo se ven en Mailpit (`http://localhost:8025`). Los
+mails no llevan nombres, solo los emails
+([ADR 008](decisiones/008-notificaciones.md)).
+
 ## Pruebas
 
 | Servicio | Tests automáticos (pytest) |
 | --- | --- |
 | Usuarios | 55 |
 | Catálogo | 81 |
-| Reservas | 76 |
+| Reservas | 82 |
+| Notificaciones | 24 |
 
-Además, `pruebas/concurrencia/test_doble_reserva.py` corre contra el sistema
-levantado con Docker: 10 pacientes reservan el mismo horario a la vez y queda
-exactamente un turno RESERVADO.
+Además, contra el sistema levantado con Docker:
+
+- `pruebas/concurrencia/test_doble_reserva.py`: 10 pacientes reservan el mismo
+  horario a la vez y queda exactamente un turno RESERVADO.
+- `pruebas/e2e/test_fallos_parciales.py`: con Notificaciones, RabbitMQ, el
+  publicador o Mailpit detenidos, al volver llegan todos los mails sin
+  duplicados.
 
 <!-- Pendiente: capturas de cada funcionalidad. -->

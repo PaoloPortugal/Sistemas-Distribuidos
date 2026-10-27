@@ -35,7 +35,7 @@ cruzan servicios no las puede hacer cumplir una FK.
 | --- | --- |
 | Todo usuario PROFESIONAL existe en PROFESIONAL (especialización total del MER) | Usuarios crea el USUARIO sin confirmar, pide a Catálogo el PROFESIONAL y confirma solo si responde bien; si no, deshace o compensa borrándolo ([ADR 002](decisiones/002-registro-profesional-compensacion.md)) |
 | El servicio de un turno es de la especialidad del profesional | Reservas consulta a Catálogo al reservar ([ADR 006](decisiones/006-copia-franja-en-turno.md)) |
-| Todo turno tiene su notificación | El evento se guarda en un outbox en la misma transacción que el turno ([ADR 005](decisiones/005-outbox-eventos-turno.md)): consistencia eventual |
+| Todo turno tiene su notificación | El evento se guarda en un outbox en la misma transacción que el turno y Notificaciones crea una notificación para el paciente y otra para el profesional al consumirlo ([ADR 005](decisiones/005-outbox-eventos-turno.md), [ADR 008](decisiones/008-notificaciones.md)): consistencia eventual |
 
 Las copias de datos entre servicios (nombre del profesional en Catálogo,
 datos del horario en TURNO) se toman del origen al crearse y se documentan
@@ -58,8 +58,28 @@ inválido ni frenar operaciones que no lo necesitan.
 - **Degradación parcial:** con Catálogo caído no se puede reservar (503, sin
   crear nada), pero la agenda y las cancelaciones siguen funcionando, porque
   TURNO guarda una copia de los datos del horario.
-- **Eventos que no se pierden:** si RabbitMQ no está disponible, los eventos
-  quedan guardados en el outbox de Reservas.
+- **Eventos que no se pierden:** Reservas guarda cada evento en un outbox en
+  la misma transacción que el turno. Un publicador aparte lo envía a RabbitMQ
+  y lo marca como publicado solo cuando el broker confirma. Si RabbitMQ está
+  caído, los eventos esperan en la tabla y reservar sigue funcionando.
+- **Entrega "al menos una vez" e idempotencia:** si el publicador se cae
+  entre publicar y marcar, el evento se publica de nuevo. Notificaciones
+  registra cada `id_evento` procesado en la misma transacción que sus
+  notificaciones, así que un evento repetido no genera avisos duplicados
+  ([ADR 008](decisiones/008-notificaciones.md)).
+- **Consumidor caído o correo caído:** los mensajes esperan en la cola durable
+  hasta que Notificaciones vuelve. Si el servidor de correo no responde, la
+  notificación queda PENDIENTE y se reintenta con espera creciente; después
+  de 8 intentos pasa a FALLIDO. Un mensaje inválido va a una cola de mensajes
+  rechazados (DLQ) en lugar de reintentarse para siempre.
+- **Probado:** `pruebas/e2e/test_fallos_parciales.py` detiene Notificaciones,
+  RabbitMQ, el publicador y Mailpit, y comprueba que, al volver, llegan todos
+  los mails y ninguno se repite.
+
+El único duplicado que no se puede descartar es el de un mail aceptado por el
+servidor de correo justo antes de que se caiga el proceso de envío: un efecto
+externo no puede ser parte de la transacción de la base
+([ADR 008](decisiones/008-notificaciones.md)).
 - **Arranque ordenado:** los servicios esperan a que PostgreSQL y RabbitMQ
   pasen su healthcheck antes de arrancar.
 
@@ -99,6 +119,4 @@ y el email se toma del token, no del cuerpo del pedido). El login responde el
 mismo mensaje y en un tiempo similar exista o no el email. Las claves y
 contraseñas no están en el repositorio.
 
-<!-- Pendiente de completar cuando se implemente: la publicación de eventos
-en RabbitMQ y el consumidor de notificaciones (tolerancia a fallos con
-entrega "al menos una vez" e idempotencia), y la observabilidad. -->
+<!-- Pendiente de completar cuando se implemente: la observabilidad. -->
