@@ -1,129 +1,145 @@
-"""Consumidor idempotente de eventos de turnos."""
+"""Consumidor de RabbitMQ: escucha el exchange `turnos` (ADR 008).
+
+Topología (la declara este servicio; las declaraciones son idempotentes):
+- exchange `turnos` (topic, durable), el mismo que usa el publicador;
+- cola `notificaciones.turnos` (quorum, durable), ligada a `turno.confirmado`
+  y `turno.cancelado`, con dead-letter a `turnos.dlx` y `x-delivery-limit`;
+- exchange `turnos.dlx` (fanout) y cola `notificaciones.turnos.dlq`.
+
+Cada mensaje:
+- inválido → reject sin reencolar → va a la DLQ;
+- válido → se registra (commit) y **recién después** se hace ack;
+- si la base no responde → se espera a que vuelva y se reencola (nack). Cada
+  reencolado cuenta para `x-delivery-limit`: un mensaje que falla siempre
+  termina en la DLQ en lugar de reintentarse para siempre.
+"""
 
 import asyncio
 import datetime
-import json
 import logging
-import uuid
+from collections.abc import Callable
+from dataclasses import dataclass, field
 
 import aio_pika
-from aio_pika import ExchangeType, IncomingMessage
-from sqlalchemy.exc import IntegrityError
+from aio_pika.abc import AbstractIncomingMessage
+from sqlalchemy import text
+from sqlalchemy.orm import Session
 
 from app.config import configuracion
-from app.correo import enviar_notificacion
-from app.db.modelos import EventoProcesado
 from app.db.sesion import obtener_fabrica_sesiones
+from app.dominio.eventos import TURNO_CANCELADO, TURNO_CONFIRMADO, EventoInvalido, interpretar
+from app.dominio.notificaciones import registrar_evento
 
-logger = logging.getLogger(__name__)
 EXCHANGE = "turnos"
-QUEUE = "notificaciones"
+EXCHANGE_DLX = "turnos.dlx"
+COLA = "notificaciones.turnos"
+COLA_DLQ = "notificaciones.turnos.dlq"
+ROUTING_KEYS = (TURNO_CONFIRMADO, TURNO_CANCELADO)
+
+registro = logging.getLogger("app.consumidor")
 
 
-async def ejecutar_consumidor(stop: asyncio.Event) -> None:
-    while not stop.is_set():
+@dataclass
+class EstadoProcesos:
+    """Lo que informa /salud."""
+
+    consumidor_conectado: bool = False
+    ultimo_envio: datetime.datetime | None = None
+    errores: list[str] = field(default_factory=list)
+
+
+def _ahora() -> datetime.datetime:
+    return datetime.datetime.now(datetime.UTC)
+
+
+async def procesar(
+    mensaje: AbstractIncomingMessage,
+    fabrica_sesiones: Callable[[], Session],
+    esperar_base: Callable[[], "asyncio.Future"] | None = None,
+) -> str:
+    """Procesa un mensaje y devuelve qué se hizo: 'nuevo', 'duplicado', 'invalido' o 'reencolado'."""
+    try:
+        evento = interpretar(mensaje.body)
+    except EventoInvalido as error:
+        registro.error("Mensaje inválido %s, va a la DLQ: %s", mensaje.message_id, error)
+        await mensaje.reject(requeue=False)
+        return "invalido"
+
+    def registrar() -> bool:
+        with fabrica_sesiones() as sesion:
+            return registrar_evento(sesion, evento, _ahora())
+
+    try:
+        nuevo = await asyncio.to_thread(registrar)  # commit adentro
+    except Exception as error:
+        registro.warning("No se pudo registrar %s (%s); se reencola", evento.id_evento, error)
+        if esperar_base is not None:
+            await esperar_base()
+        await mensaje.nack(requeue=True)
+        return "reencolado"
+
+    await mensaje.ack()  # recién después del commit
+    return "nuevo" if nuevo else "duplicado"
+
+
+async def declarar_topologia(canal: aio_pika.abc.AbstractChannel) -> aio_pika.abc.AbstractQueue:
+    exchange = await canal.declare_exchange(EXCHANGE, aio_pika.ExchangeType.TOPIC, durable=True)
+    dlx = await canal.declare_exchange(EXCHANGE_DLX, aio_pika.ExchangeType.FANOUT, durable=True)
+    dlq = await canal.declare_queue(COLA_DLQ, durable=True)
+    await dlq.bind(dlx)
+    cola = await canal.declare_queue(
+        COLA,
+        durable=True,
+        arguments={
+            "x-queue-type": "quorum",
+            "x-dead-letter-exchange": EXCHANGE_DLX,
+            "x-delivery-limit": configuracion.limite_entregas,
+        },
+    )
+    for routing_key in ROUTING_KEYS:
+        await cola.bind(exchange, routing_key=routing_key)
+    return cola
+
+
+async def _esperar_base() -> None:
+    """Espera, con espera creciente, a que la base vuelva a responder."""
+    espera = 1.0
+    while True:
         try:
-            await _consumir(stop)
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            logger.exception("fallo_consumidor_notificaciones")
-            try:
-                await asyncio.wait_for(stop.wait(), timeout=5)
-            except asyncio.TimeoutError:
-                pass
+            def probar():
+                with obtener_fabrica_sesiones()() as sesion:
+                    sesion.execute(text("SELECT 1"))
 
-
-async def _consumir(stop: asyncio.Event) -> None:
-    connection = await aio_pika.connect_robust(configuracion.url_rabbitmq)
-    try:
-        channel = await connection.channel()
-        await channel.set_qos(prefetch_count=10)
-        exchange = await channel.declare_exchange(EXCHANGE, ExchangeType.TOPIC, durable=True)
-        queue = await channel.declare_queue(QUEUE, durable=True)
-        await queue.bind(exchange, routing_key="turno.*")
-        async with queue.iterator() as mensajes:
-            async for mensaje in mensajes:
-                if stop.is_set():
-                    break
-                await _procesar_con_reintentos(mensaje)
-    finally:
-        await connection.close()
-
-
-async def _procesar_con_reintentos(mensaje: IncomingMessage) -> None:
-    intentos = int((mensaje.headers or {}).get("x-intentos", 0))
-    try:
-        payload = json.loads(mensaje.body)
-        await _procesar(payload)
-    except Exception:
-        logger.exception("fallo_procesando_evento", extra={"event_id": mensaje.message_id})
-        if intentos >= configuracion.max_reintentos:
-            await mensaje.reject(requeue=False)
+            await asyncio.to_thread(probar)
             return
-        await asyncio.sleep(min(2**intentos, 30))
-        await mensaje.channel.default_exchange.publish(
-            aio_pika.Message(
-                mensaje.body,
-                content_type=mensaje.content_type,
-                message_id=mensaje.message_id,
-                type=mensaje.type,
-                headers={"x-intentos": intentos + 1},
-                delivery_mode=mensaje.delivery_mode,
-            ),
-            routing_key=mensaje.routing_key,
-        )
-        await mensaje.ack()
-    else:
-        await mensaje.ack()
+        except Exception:
+            await asyncio.sleep(espera)
+            espera = min(espera * 2, 30.0)
 
 
-async def _procesar(payload: dict) -> None:
-    id_evento = uuid.UUID(payload["id_evento"])
-    if _ya_procesado(id_evento):
-        return
-    tipo = payload["tipo"]
-    asunto = "Turno confirmado" if tipo == "turno.confirmado" else "Turno cancelado"
-    cuerpo = _cuerpo(tipo, payload)
-    await enviar_notificacion(
-        destinatario=payload["email_paciente"], asunto=asunto, cuerpo=cuerpo
-    )
-    await enviar_notificacion(
-        destinatario=payload["email_profesional"], asunto=asunto, cuerpo=cuerpo
-    )
-    _registrar_procesado(id_evento, tipo)
-
-
-def _ya_procesado(id_evento: uuid.UUID) -> bool:
-    with obtener_fabrica_sesiones()() as sesion:
-        return sesion.get(EventoProcesado, id_evento) is not None
-
-
-def _registrar_procesado(id_evento: uuid.UUID, tipo: str) -> None:
-    with obtener_fabrica_sesiones()() as sesion:
+async def consumir(estado: EstadoProcesos) -> None:
+    """Bucle del consumidor: si se pierde la conexión, se reconecta con espera creciente."""
+    espera = 1.0
+    while True:
         try:
-            sesion.add(
-                EventoProcesado(
-                    id_evento=id_evento,
-                    tipo=tipo,
-                    procesado_en=datetime.datetime.now(datetime.UTC),
-                )
-            )
-            sesion.commit()
-        except IntegrityError:
-            sesion.rollback()
-
-
-def _cuerpo(tipo: str, payload: dict) -> str:
-    accion = "confirmado" if tipo == "turno.confirmado" else "cancelado"
-    cuerpo = (
-        f"Su turno fue {accion}.\n\n"
-        f"Fecha: {payload['fecha']}\n"
-        f"Horario: {payload['horario_inicio']} - {payload['horario_fin']}\n"
-    )
-    if tipo == "turno.cancelado":
-        cuerpo += (
-            f"Cancelado por: {payload.get('cancelado_por', 'desconocido')}\n"
-            f"Motivo: {payload.get('motivo') or 'Sin motivo indicado'}\n"
-        )
-    return cuerpo
+            conexion = await aio_pika.connect(configuracion.url_rabbitmq)
+            async with conexion:
+                canal = await conexion.channel()
+                await canal.set_qos(prefetch_count=configuracion.prefetch)
+                cola = await declarar_topologia(canal)
+                estado.consumidor_conectado = True
+                registro.info("Consumiendo %s", COLA)
+                espera = 1.0
+                async with cola.iterator() as mensajes:
+                    async for mensaje in mensajes:
+                        await procesar(mensaje, obtener_fabrica_sesiones(), _esperar_base)
+        except asyncio.CancelledError:
+            estado.consumidor_conectado = False
+            raise
+        except Exception as error:
+            estado.consumidor_conectado = False
+            registro.warning("Consumidor desconectado (%s); reintento en %.0f s", error, espera)
+            await asyncio.sleep(espera)
+            espera = min(espera * 2, 30.0)
+        else:
+            estado.consumidor_conectado = False

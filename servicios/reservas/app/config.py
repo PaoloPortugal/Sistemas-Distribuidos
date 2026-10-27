@@ -9,8 +9,14 @@ class Configuracion(BaseSettings):
     zona_horaria: str = "America/Montevideo"
     url_catalogo: str = ""
     timeout_catalogo_segundos: float = 3.0
+    # Publicador del outbox (proceso aparte: python -m app.publicador).
     url_rabbitmq: str = ""
-    intervalo_publicador_segundos: float = 1.0
+    publicador_lote: int = 50
+    publicador_intervalo_segundos: float = 1.0
+    publicador_espera_maxima_segundos: float = 30.0
+    # Pausa entre eventos para limitar el ritmo; la prueba de fallos c) la usa
+    # para poder matar al publicador a mitad de un lote.
+    publicador_pausa_entre_eventos_segundos: float = 0.0
 
 
 configuracion = Configuracion()

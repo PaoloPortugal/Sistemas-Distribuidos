@@ -1,26 +1,36 @@
-"""Adaptador SMTP; en desarrollo apunta a Mailpit."""
+"""Adaptador de correo: SMTP (Mailpit en desarrollo)."""
 
-import asyncio
 import smtplib
 from email.message import EmailMessage
+from email.utils import formatdate
 
 from app.config import configuracion
 
 
-async def enviar_notificacion(
-    *,
-    destinatario: str,
-    asunto: str,
-    cuerpo: str,
-) -> None:
-    mensaje = EmailMessage()
-    mensaje["From"] = "turnos@clinica.local"
-    mensaje["To"] = destinatario
-    mensaje["Subject"] = asunto
-    mensaje.set_content(cuerpo)
-    await asyncio.to_thread(_enviar_smtp, mensaje)
+class ServidorSmtp:
+    def __init__(self, host: str, puerto: int, remitente: str, timeout: float):
+        self._host = host
+        self._puerto = puerto
+        self._remitente = remitente
+        self._timeout = timeout
+
+    def enviar(self, *, para: str, asunto: str, cuerpo: str, id_mensaje: str) -> None:
+        mensaje = EmailMessage()
+        mensaje["From"] = self._remitente
+        mensaje["To"] = para
+        mensaje["Subject"] = asunto
+        mensaje["Date"] = formatdate(localtime=True)
+        # Fijo por notificación: si el mail se reenvía, es el mismo Message-ID.
+        mensaje["Message-ID"] = f"<{id_mensaje}@{self._remitente.split('@')[-1]}>"
+        mensaje.set_content(cuerpo)
+        with smtplib.SMTP(self._host, self._puerto, timeout=self._timeout) as servidor:
+            servidor.send_message(mensaje)
 
 
-def _enviar_smtp(mensaje: EmailMessage) -> None:
-    with smtplib.SMTP(configuracion.smtp_host, configuracion.smtp_puerto, timeout=10) as smtp:
-        smtp.send_message(mensaje)
+def servidor_configurado() -> ServidorSmtp:
+    return ServidorSmtp(
+        configuracion.smtp_host,
+        configuracion.smtp_puerto,
+        configuracion.smtp_remitente,
+        configuracion.smtp_timeout_segundos,
+    )

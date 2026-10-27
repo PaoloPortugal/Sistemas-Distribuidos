@@ -122,10 +122,9 @@ Las reglas las aplica reservas, en su dominio:
 
 Reservas escribe cada evento en su **outbox** (`reservas.evento_saliente`) en
 la misma transacción que el cambio del turno
-([ADR 005](decisiones/005-outbox-eventos-turno.md)). El publicador de Reservas
-lee los eventos pendientes, los publica como mensajes persistentes y solo
-completa `publicado_en` después de la confirmación del broker. Si RabbitMQ no
-está disponible, los eventos quedan en el outbox para el siguiente intento.
+([ADR 005](decisiones/005-outbox-eventos-turno.md)); el proceso
+`reservas-publicador` lo publica en RabbitMQ y notificaciones lo consume
+([ADR 008](decisiones/008-notificaciones.md)).
 
 | Evento | Cuándo |
 | --- | --- |
@@ -156,9 +155,59 @@ No existe `turno.modificado`: modificar un turno es cancelarlo y reservar otro.
 `event_id` con el que el consumidor descarta duplicados (la entrega es "al
 menos una vez").
 
-El consumidor de Notificaciones usa una cola durable, registra los `id_evento`
-en `notificaciones.evento_procesado` y envía dos correos por evento. Los
-fallos se reintentan con backoff hasta `MAX_REINTENTOS`; después se rechazan y
-se descartan.
-La configuración se realiza con `URL_RABBITMQ`, `SMTP_HOST`, `SMTP_PUERTO` y
-`MAX_REINTENTOS`.
+### Topología en RabbitMQ
+
+```
+reservas-publicador ──(turno.confirmado / turno.cancelado)──▶ exchange `turnos` (topic, durable)
+                                                                   │  binding: turno.confirmado
+                                                                   │  binding: turno.cancelado
+                                                                   ▼
+                                                 cola `notificaciones.turnos` (quorum, durable)
+                                                                   │  rechazados o tras 5 entregas
+                                                                   ▼
+                                     exchange `turnos.dlx` (fanout) ──▶ cola `notificaciones.turnos.dlq`
+```
+
+| Elemento | Quién lo declara | Detalle |
+| --- | --- | --- |
+| Exchange `turnos` | Publicador y notificaciones (la declaración es idempotente) | Topic, durable |
+| Routing keys | Publicador | Igual al tipo: `turno.confirmado`, `turno.cancelado` |
+| Mensaje | Publicador | Cuerpo = evento en JSON; `message_id` = `id_evento`; `type` = tipo; persistente (`delivery_mode` 2) |
+| Cola `notificaciones.turnos` | Notificaciones | Quorum, durable, `x-dead-letter-exchange: turnos.dlx`, `x-delivery-limit: 5` |
+| Exchange `turnos.dlx` y cola `notificaciones.turnos.dlq` | Notificaciones | Fanout y cola durable: guardan los mensajes que no se pudieron procesar, para revisarlos a mano |
+
+### Garantía de entrega: al menos una vez + consumidor idempotente
+
+- **Del outbox a RabbitMQ:** el publicador marca `publicado_en` solo con la
+  confirmación del broker (publisher confirms) y publica con `mandatory`. Si
+  algo falla, el evento sigue pendiente y se reintenta; si se cae entre la
+  confirmación y el commit, se publica dos veces.
+- **De RabbitMQ a notificaciones:** el consumidor hace ack **después del
+  commit**. Si se cae antes del ack, RabbitMQ entrega el mensaje de nuevo.
+- **Duplicados:** por los dos puntos anteriores un evento puede llegar más de
+  una vez. Notificaciones registra `id_evento` en `evento_procesado` en la
+  misma transacción que las NOTIFICACION: la segunda vez no crea nada y
+  confirma el mensaje igual.
+- **Orden:** no se garantiza un orden estricto entre eventos (reentregas,
+  varias réplicas del publicador); cada evento se procesa por separado y no
+  depende de otro.
+
+### Ciclo de vida de un mensaje
+
+1. Reservas confirma o cancela un turno y escribe el evento en el outbox, en
+   la misma transacción.
+2. El publicador lo toma, lo publica en `turnos` y, con la confirmación,
+   completa `publicado_en`.
+3. RabbitMQ lo enruta a `notificaciones.turnos` (persistente, replicado en la
+   cola quorum).
+4. El consumidor lo valida:
+   - **inválido** (JSON roto, faltan campos, tipo desconocido) → `reject` sin
+     reencolar → `turnos.dlx` → DLQ;
+   - **repetido** (`id_evento` ya procesado) → ack, sin efectos;
+   - **nuevo** → en una transacción: `evento_procesado` + 2 NOTIFICACION
+     (paciente y profesional) en PENDIENTE + 2 `envio_mail`; commit; ack;
+   - **error transitorio** (la base no responde) → espera a que vuelva y lo
+     reencola. Cada reencolado cuenta: después de 5 entregas va a la DLQ.
+5. El envío manda cada mail por SMTP y pasa su NOTIFICACION a ENVIADO; si
+   falla, reintenta con espera creciente y, tras 8 intentos, la pasa a
+   FALLIDO (ADR 008).
