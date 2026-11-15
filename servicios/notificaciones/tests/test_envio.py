@@ -5,6 +5,7 @@ import datetime
 
 import pytest
 
+from app import consumidor
 from app.consumidor import procesar
 from app.db.modelos import EnvioMail, Notificacion
 from app.dominio.envio import PoliticaReintentos, enviar_pendientes
@@ -16,7 +17,10 @@ PROFESIONAL = "dr.gomez@ejemplo.com"
 
 
 @pytest.fixture
-def con_un_evento(fabrica_sesiones):
+def con_un_evento(fabrica_sesiones, monkeypatch):
+    # El consumidor fija el primer intento de envío en su "ahora": se lo ata a AHORA
+    # para que las pruebas no dependan de la fecha real en que se corren.
+    monkeypatch.setattr(consumidor, "_ahora", lambda: AHORA)
     asyncio.run(procesar(MensajeFalso(evento()), fabrica_sesiones))
 
 
