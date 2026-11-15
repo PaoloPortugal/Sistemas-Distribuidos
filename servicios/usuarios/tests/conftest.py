@@ -1,6 +1,8 @@
 """Fixtures comunes: base SQLite en memoria en lugar de PostgreSQL, claves JWT
 temporales y un catálogo falso en lugar del servicio catalogo_medicos."""
 
+import json
+import logging
 from collections.abc import Iterator
 
 import pytest
@@ -17,6 +19,7 @@ from app.db.modelos import ESQUEMA, Base
 from app.db.sesion import obtener_sesion
 from app.dominio import tokens
 from app.main import app
+from app.observabilidad import FormateadorJson
 
 CONTRASENA = "clave-segura-123"
 
@@ -149,3 +152,21 @@ def datos_profesional(**cambios) -> dict:
         "id_especialidad": 1,
     }
     return datos | cambios
+
+
+@pytest.fixture
+def lineas_json() -> Iterator[list[dict]]:
+    """Líneas JSON de los logs, formateadas al emitirse (con el correlation_id de ese momento)."""
+    lineas: list[dict] = []
+
+    class Capturador(logging.Handler):
+        def emit(self, registro: logging.LogRecord) -> None:
+            lineas.append(json.loads(FormateadorJson("pruebas").format(registro)))
+
+    raiz = logging.getLogger()
+    capturador, nivel_anterior = Capturador(), raiz.level
+    raiz.addHandler(capturador)
+    raiz.setLevel(logging.INFO)
+    yield lineas
+    raiz.removeHandler(capturador)
+    raiz.setLevel(nivel_anterior)

@@ -14,7 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.clientes.catalogo import ClienteCatalogo
+from app.clientes.catalogo import CatalogoNoDisponible, ClienteCatalogo
 from app.clientes.usuarios import ClienteUsuarios, DatosUsuario, UsuariosNoDisponible
 from app.db.modelos import (
     CANCELADO,
@@ -90,7 +90,15 @@ def reservar(
     Catálogo informa la franja y el servicio; las reglas se aplican acá. Si
     catálogo no responde, no se crea nada (las excepciones del cliente suben).
     """
-    franja = catalogo.datos_para_reservar(id_disponibilidad, id_servicio)
+    try:
+        franja = catalogo.datos_para_reservar(id_disponibilidad, id_servicio)
+    except CatalogoNoDisponible as error:
+        registro.warning(
+            "Reserva rechazada: catálogo no disponible (%s)",
+            error,
+            extra={"id_disponibilidad": id_disponibilidad, "motivo": "CATALOGO_NO_DISPONIBLE"},
+        )
+        raise
     # Coherencia del servicio (modelo relacional): SERVICIO.id_especialidad =
     # PROFESIONAL.id_especialidad del dueño de la disponibilidad.
     if franja.id_especialidad_servicio != franja.id_especialidad:
@@ -103,6 +111,11 @@ def reservar(
     bloqueos.tomar_lock(sesion, franja.id_disponibilidad, exclusivo=False)
     if bloqueos.esta_bloqueada(sesion, franja.id_disponibilidad):
         sesion.rollback()
+        registro.warning(
+            "Reserva rechazada: la franja %d se está borrando",
+            franja.id_disponibilidad,
+            extra={"id_disponibilidad": franja.id_disponibilidad, "motivo": "FRANJA_BLOQUEADA"},
+        )
         raise HorarioNoDisponible
 
     turno = Turno(
@@ -124,8 +137,25 @@ def reservar(
     except IntegrityError:
         sesion.rollback()
         if _franja_reservada(sesion, franja.id_disponibilidad):
+            registro.warning(
+                "Reserva rechazada: la franja %d ya tiene un turno reservado",
+                franja.id_disponibilidad,
+                extra={
+                    "id_disponibilidad": franja.id_disponibilidad,
+                    "motivo": "HORARIO_YA_RESERVADO",
+                },
+            )
             raise HorarioYaReservado from None
         raise
+    registro.info(
+        "Turno %d reservado",
+        turno.id_turno,
+        extra={
+            "id_turno": turno.id_turno,
+            "id_disponibilidad": turno.id_disponibilidad,
+            "id_servicio": turno.id_servicio,
+        },
+    )
     return turno
 
 
@@ -164,6 +194,16 @@ def cancelar(
     turno.motivo_cancelacion = motivo
     sesion.add(_evento(TURNO_CANCELADO, turno, ahora))
     sesion.commit()
+    registro.info(
+        "Turno %d cancelado por el %s",
+        turno.id_turno,
+        cancelado_por.lower(),
+        extra={
+            "id_turno": turno.id_turno,
+            "id_disponibilidad": turno.id_disponibilidad,
+            "cancelado_por": cancelado_por,
+        },
+    )
     return turno
 
 

@@ -51,6 +51,7 @@ def registrar_paciente(
     usuario.paciente = Paciente(documento=documento, telefono=telefono)
     _insertar(sesion, usuario)
     sesion.commit()
+    registro.info("Paciente registrado", extra={"tipo_usuario": PACIENTE})
     return usuario
 
 
@@ -85,6 +86,11 @@ def registrar_profesional(
         )
     except CatalogoNoDisponible as error:
         sesion.rollback()
+        registro.warning(
+            "Alta de profesional no completada: catálogo no disponible (%s)",
+            error,
+            extra={"compensa": error.puede_haber_creado},
+        )
         if error.puede_haber_creado:
             _compensar(catalogo, usuario.email)
         raise
@@ -102,8 +108,19 @@ def registrar_profesional(
         sesion.commit()
     except SQLAlchemyError as error:
         sesion.rollback()
+        # Solo el tipo: el texto de un SQLAlchemyError trae los parámetros del
+        # INSERT (email y hash de la contraseña).
+        registro.warning(
+            "Alta de profesional no completada: no se pudo confirmar el usuario (%s)",
+            type(error).__name__,
+            extra={"compensa": True},
+        )
         _compensar(catalogo, usuario.email)
         raise RegistroNoCompletado from error
+    registro.info(
+        "Profesional registrado",
+        extra={"tipo_usuario": PROFESIONAL, "id_especialidad": id_especialidad},
+    )
     return usuario
 
 

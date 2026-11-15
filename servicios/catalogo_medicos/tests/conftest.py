@@ -7,6 +7,8 @@ real se verifica contra PostgreSQL con Docker.
 """
 
 import datetime
+import json
+import logging
 from collections.abc import Iterator
 
 import jwt
@@ -28,6 +30,7 @@ from app.db.modelos import ESQUEMA, Base, Especialidad, Profesional, Servicio
 from app.db.sesion import obtener_sesion
 from app.dominio import reloj, tokens
 from app.main import app
+from app.observabilidad import FormateadorJson
 
 # Lunes 2 de noviembre de 2026, 10:00 en la zona de la clínica.
 AHORA = datetime.datetime(2026, 11, 2, 10, 0)
@@ -208,3 +211,21 @@ def datos_profesional(**cambios) -> dict:
         "apellido": "Gómez",
     }
     return datos | cambios
+
+
+@pytest.fixture
+def lineas_json() -> Iterator[list[dict]]:
+    """Líneas JSON de los logs, formateadas al emitirse (con el correlation_id de ese momento)."""
+    lineas: list[dict] = []
+
+    class Capturador(logging.Handler):
+        def emit(self, registro: logging.LogRecord) -> None:
+            lineas.append(json.loads(FormateadorJson("pruebas").format(registro)))
+
+    raiz = logging.getLogger()
+    capturador, nivel_anterior = Capturador(), raiz.level
+    raiz.addHandler(capturador)
+    raiz.setLevel(logging.INFO)
+    yield lineas
+    raiz.removeHandler(capturador)
+    raiz.setLevel(nivel_anterior)

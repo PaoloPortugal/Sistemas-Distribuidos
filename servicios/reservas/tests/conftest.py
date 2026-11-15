@@ -4,6 +4,8 @@ un reloj que se puede mover y un catálogo falso.
 """
 
 import datetime
+import json
+import logging
 from collections.abc import Iterator
 from zoneinfo import ZoneInfo
 
@@ -29,6 +31,7 @@ from app.db.modelos import ESQUEMA, Base
 from app.db.sesion import obtener_sesion
 from app.dominio import reloj, tokens
 from app.main import app
+from app.observabilidad import FormateadorJson
 
 MONTEVIDEO = ZoneInfo("America/Montevideo")
 # Lunes 2 de noviembre de 2026, 10:00 en Montevideo.
@@ -227,3 +230,21 @@ def cliente(fabrica_sesiones, catalogo, usuarios, reloj_fijo) -> Iterator[TestCl
 
 def reserva(id_disponibilidad: int = FRANJA, id_servicio: int = SERVICIO) -> dict:
     return {"id_disponibilidad": id_disponibilidad, "id_servicio": id_servicio}
+
+
+@pytest.fixture
+def lineas_json() -> Iterator[list[dict]]:
+    """Líneas JSON de los logs, formateadas al emitirse (con el correlation_id de ese momento)."""
+    lineas: list[dict] = []
+
+    class Capturador(logging.Handler):
+        def emit(self, registro: logging.LogRecord) -> None:
+            lineas.append(json.loads(FormateadorJson("pruebas").format(registro)))
+
+    raiz = logging.getLogger()
+    capturador, nivel_anterior = Capturador(), raiz.level
+    raiz.addHandler(capturador)
+    raiz.setLevel(logging.INFO)
+    yield lineas
+    raiz.removeHandler(capturador)
+    raiz.setLevel(nivel_anterior)

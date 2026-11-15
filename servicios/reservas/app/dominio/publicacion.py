@@ -13,6 +13,7 @@ trae del pedido que lo originó, así los logs del publicador lo incluyen.
 
 import asyncio
 import datetime
+import logging
 from collections.abc import Callable
 from typing import Protocol
 
@@ -21,6 +22,8 @@ from sqlalchemy.orm import Session
 
 from app.db.modelos import EventoSaliente
 from app.observabilidad import con_correlation_id
+
+registro = logging.getLogger(__name__)
 
 
 class Publicador(Protocol):
@@ -63,6 +66,16 @@ async def publicar_pendientes(
                 await publicador.publicar(evento)  # espera la confirmación del broker
                 evento.publicado_en = ahora()
                 sesion.commit()
+                registro.info(
+                    "Evento %s %s publicado",
+                    evento.tipo,
+                    evento.id_evento,
+                    extra={
+                        "id_evento": str(evento.id_evento),
+                        "tipo_evento": evento.tipo,
+                        "id_turno": evento.payload.get("id_turno"),
+                    },
+                )
         publicados += 1
         if pausa:
             await asyncio.sleep(pausa)
