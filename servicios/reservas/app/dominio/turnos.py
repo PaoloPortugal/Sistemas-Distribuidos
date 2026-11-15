@@ -27,6 +27,7 @@ from app.db.modelos import (
     Turno,
 )
 from app.dominio import bloqueos, reloj
+from app.observabilidad import obtener_correlation_id
 
 PLAZO_CANCELACION_PACIENTE = datetime.timedelta(hours=24)
 DIAS_POR_DEFECTO = 30
@@ -234,7 +235,11 @@ def _franja_reservada(sesion: Session, id_disponibilidad: int) -> bool:
 
 
 def _evento(tipo: str, turno: Turno, ahora: datetime.datetime) -> EventoSaliente:
-    """Evento para el outbox; `id_evento` es el event_id que deduplica el consumidor."""
+    """Evento para el outbox; `id_evento` es el event_id que deduplica el consumidor.
+
+    `correlation_id` es el del pedido que originó el cambio: viaja con el evento
+    para seguir la reserva en los logs del publicador y de notificaciones.
+    """
     id_evento = uuid.uuid4()
     payload = {
         "id_evento": str(id_evento),
@@ -248,6 +253,7 @@ def _evento(tipo: str, turno: Turno, ahora: datetime.datetime) -> EventoSaliente
         "fecha": turno.fecha.isoformat(),
         "horario_inicio": turno.horario_inicio.isoformat(),
         "horario_fin": turno.horario_fin.isoformat(),
+        "correlation_id": obtener_correlation_id(),
     }
     if tipo == TURNO_CANCELADO:
         payload |= {"cancelado_por": turno.cancelado_por, "motivo": turno.motivo_cancelacion}

@@ -6,6 +6,9 @@ y `publicado_en` se completa **solo si el broker confirmó**. Si el proceso se
 cae entre la confirmación y el commit, el evento se vuelve a publicar: la
 entrega es "al menos una vez" y el consumidor descarta duplicados por
 `id_evento`.
+
+Mientras publica un evento, el correlation_id del contexto es el que el evento
+trae del pedido que lo originó, así los logs del publicador lo incluyen.
 """
 
 import asyncio
@@ -17,6 +20,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.modelos import EventoSaliente
+from app.observabilidad import con_correlation_id
 
 
 class Publicador(Protocol):
@@ -55,9 +59,10 @@ async def publicar_pendientes(
             evento = _siguiente_pendiente(sesion)
             if evento is None:
                 break
-            await publicador.publicar(evento)  # espera la confirmación del broker
-            evento.publicado_en = ahora()
-            sesion.commit()
+            with con_correlation_id(evento.payload.get("correlation_id")):
+                await publicador.publicar(evento)  # espera la confirmación del broker
+                evento.publicado_en = ahora()
+                sesion.commit()
         publicados += 1
         if pausa:
             await asyncio.sleep(pausa)

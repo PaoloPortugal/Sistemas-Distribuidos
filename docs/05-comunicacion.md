@@ -249,13 +249,19 @@ No existe `turno.modificado`: modificar un turno es cancelarlo y reservar otro.
   "horario_inicio": "09:00:00",
   "horario_fin": "09:30:00",
   "cancelado_por": "PACIENTE",
-  "motivo": "Viaje"
+  "motivo": "Viaje",
+  "correlation_id": "9db25cc1-…"
 }
 ```
 
 `cancelado_por` y `motivo` solo vienen en `turno.cancelado`. `id_evento` es el
 `event_id` con el que el consumidor descarta duplicados (la entrega es "al
 menos una vez").
+
+`correlation_id` es el del pedido que reservó o canceló; también va en la
+propiedad `correlation_id` del mensaje AMQP. Es opcional (puede faltar o ser
+`null`) y solo sirve para los logs
+([ADR 010](decisiones/010-correlation-id-en-eventos-y-envio.md)).
 
 ### Topología en RabbitMQ
 

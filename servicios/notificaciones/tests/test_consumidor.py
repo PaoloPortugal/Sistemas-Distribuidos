@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.consumidor import procesar
 from app.db.modelos import EnvioMail, EventoProcesado, Notificacion
+from app.observabilidad import obtener_correlation_id
 from tests.conftest import MensajeFalso, evento
 
 
@@ -136,3 +137,65 @@ def test_si_la_base_falla_no_hay_ack_y_se_reencola(motor, fabrica_sesiones):
     assert esperas == ["esperó a la base"]
     assert mensaje.bitacora == ["nack(requeue=True)"]  # cuenta para x-delivery-limit
     assert contenido(fabrica_sesiones) == ([], 0, 0)
+
+
+# --- correlation_id (observabilidad) ---
+
+
+def _del_consumidor(lineas: list[dict]) -> list[dict]:
+    return [linea for linea in lineas if linea["logger"] == "app.consumidor"]
+
+
+def test_el_log_del_evento_lleva_el_correlation_id_y_el_id_turno(fabrica_sesiones, lineas_json):
+    asyncio.run(procesar(MensajeFalso(evento(correlation_id="reserva-123")), fabrica_sesiones))
+
+    (linea,) = _del_consumidor(lineas_json)
+    assert linea["correlation_id"] == "reserva-123"
+    assert (linea["id_turno"], linea["tipo_evento"], linea["resultado"]) == (
+        15,
+        "turno.confirmado",
+        "nuevo",
+    )
+
+
+def test_el_duplicado_tambien_se_registra_con_su_correlation_id(fabrica_sesiones, lineas_json):
+    datos = evento(correlation_id="reserva-123")
+    asyncio.run(procesar(MensajeFalso(datos), fabrica_sesiones))
+    asyncio.run(procesar(MensajeFalso(datos), fabrica_sesiones))
+
+    assert [(x["correlation_id"], x["resultado"]) for x in _del_consumidor(lineas_json)] == [
+        ("reserva-123", "nuevo"),
+        ("reserva-123", "duplicado"),
+    ]
+
+
+def test_sin_correlation_id_en_el_cuerpo_usa_el_del_mensaje(fabrica_sesiones, lineas_json):
+    mensaje = MensajeFalso(evento(), correlation_id="propiedad-amqp")
+
+    asyncio.run(procesar(mensaje, fabrica_sesiones))
+
+    (linea,) = _del_consumidor(lineas_json)
+    assert linea["correlation_id"] == "propiedad-amqp"
+
+
+def test_un_evento_sin_correlation_id_se_procesa_igual(fabrica_sesiones, lineas_json):
+    # Eventos publicados antes de que el campo existiera.
+    assert asyncio.run(procesar(MensajeFalso(evento()), fabrica_sesiones)) == "nuevo"
+    (linea,) = _del_consumidor(lineas_json)
+    assert linea["correlation_id"] is None
+
+
+def test_el_mensaje_invalido_se_registra_con_el_correlation_id_del_mensaje(
+    fabrica_sesiones, lineas_json
+):
+    mensaje = MensajeFalso(b"no es json", correlation_id="propiedad-amqp")
+
+    asyncio.run(procesar(mensaje, fabrica_sesiones))
+
+    (linea,) = _del_consumidor(lineas_json)
+    assert (linea["nivel"], linea["correlation_id"]) == ("ERROR", "propiedad-amqp")
+
+
+def test_despues_de_procesar_no_queda_correlation_id(fabrica_sesiones):
+    asyncio.run(procesar(MensajeFalso(evento(correlation_id="reserva-123")), fabrica_sesiones))
+    assert obtener_correlation_id() is None

@@ -2,6 +2,7 @@
 
 import asyncio
 import datetime
+import json
 import uuid
 
 import pytest
@@ -10,6 +11,8 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.db.modelos import EventoSaliente
 from app.dominio.publicacion import publicar_pendientes
+from app.eventos import PublicadorRabbit
+from app.observabilidad import obtener_correlation_id
 
 INICIO = datetime.datetime(2026, 11, 2, 13, 0, tzinfo=datetime.UTC)
 PUBLICADO = datetime.datetime(2026, 11, 2, 13, 5, tzinfo=datetime.UTC)
@@ -131,3 +134,60 @@ def test_si_se_cae_entre_publicar_y_marcar_se_vuelve_a_publicar(motor, fabrica_s
     assert publicar(fabrica_sesiones, broker) == 1
     assert broker.publicados == [1, 1]
     assert estado(fabrica_sesiones)[1] == PUBLICADO
+
+
+# --- correlation_id (observabilidad) ---
+
+
+class BrokerQueAnotaElContexto:
+    """Anota el correlation_id vigente mientras se publica cada evento."""
+
+    def __init__(self):
+        self.contextos: list[str | None] = []
+
+    async def publicar(self, evento: EventoSaliente) -> None:
+        self.contextos.append(obtener_correlation_id())
+
+
+def test_publica_cada_evento_con_su_correlation_id(fabrica_sesiones):
+    with fabrica_sesiones() as sesion:
+        for numero, correlation_id in enumerate(["reserva-1", None], start=1):
+            sesion.add(
+                EventoSaliente(
+                    id_evento=uuid.uuid4(),
+                    tipo="turno.confirmado",
+                    payload={"numero": numero, "correlation_id": correlation_id},
+                    creado_en=INICIO + datetime.timedelta(seconds=numero),
+                )
+            )
+        sesion.commit()
+    broker = BrokerQueAnotaElContexto()
+
+    publicar(fabrica_sesiones, broker)
+
+    assert broker.contextos == ["reserva-1", None]
+    assert obtener_correlation_id() is None
+
+
+class ExchangeFalso:
+    def __init__(self):
+        self.mensajes: list = []
+
+    async def publish(self, mensaje, routing_key: str, mandatory: bool):
+        self.mensajes.append(mensaje)
+
+
+def test_el_mensaje_amqp_lleva_el_correlation_id():
+    exchange = ExchangeFalso()
+    evento = EventoSaliente(
+        id_evento=uuid.uuid4(),
+        tipo="turno.confirmado",
+        payload={"id_turno": 1, "correlation_id": "reserva-1"},
+        creado_en=INICIO,
+    )
+
+    asyncio.run(PublicadorRabbit(exchange).publicar(evento))
+
+    (mensaje,) = exchange.mensajes
+    assert mensaje.correlation_id == "reserva-1"
+    assert json.loads(mensaje.body)["correlation_id"] == "reserva-1"

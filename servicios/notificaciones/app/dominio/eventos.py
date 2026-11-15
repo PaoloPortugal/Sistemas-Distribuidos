@@ -32,6 +32,9 @@ class EventoTurno(BaseModel):
     horario_fin: datetime.time
     cancelado_por: Literal["PACIENTE", "PROFESIONAL"] | None = None
     motivo: str | None = None
+    # Del pedido que originó el evento en reservas; solo para los logs. Es
+    # opcional para aceptar eventos publicados antes de que existiera.
+    correlation_id: str | None = None
 
     @model_validator(mode="after")
     def cancelacion_completa(self) -> "EventoTurno":

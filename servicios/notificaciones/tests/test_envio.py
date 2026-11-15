@@ -130,3 +130,38 @@ def test_cuando_el_servidor_vuelve_se_envia(fabrica_sesiones, con_un_evento):
 
     assert resultado.enviados == 2
     assert {e[0] for e in estados(fabrica_sesiones).values()} == {"ENVIADO"}
+
+
+# --- logs (observabilidad) ---
+
+
+def _del_envio(lineas: list[dict]) -> list[dict]:
+    return [linea for linea in lineas if linea["logger"] == "app.dominio.envio"]
+
+
+def test_cada_resultado_se_registra_con_el_id_turno(fabrica_sesiones, con_un_evento, lineas_json):
+    correo = CorreoFalso()
+    correo.fallar_para = {PACIENTE}
+
+    enviar(fabrica_sesiones, correo)
+
+    lineas = {linea["destinatario"]: linea for linea in _del_envio(lineas_json)}
+    assert {d: (x["nivel"], x["id_turno"], x["intentos"]) for d, x in lineas.items()} == {
+        "PACIENTE": ("WARNING", 15, 1),
+        "PROFESIONAL": ("INFO", 15, 1),
+    }
+    assert "SMTP no disponible" in lineas["PACIENTE"]["ultimo_error"]
+    # Los mails no llevan direcciones de correo en el log, solo el rol del destinatario.
+    assert PACIENTE not in str(lineas)
+
+
+def test_el_fallido_definitivo_se_registra_como_error(fabrica_sesiones, con_un_evento, lineas_json):
+    correo = CorreoFalso()
+    correo.fallar_para = {PACIENTE}
+    momento = AHORA
+    for _ in range(POLITICA.max_intentos):
+        enviar(fabrica_sesiones, correo, momento)
+        momento += datetime.timedelta(minutes=5)
+
+    ultima = [x for x in _del_envio(lineas_json) if x["destinatario"] == "PACIENTE"][-1]
+    assert (ultima["nivel"], ultima["intentos"]) == ("ERROR", 8)
