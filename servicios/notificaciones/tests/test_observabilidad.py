@@ -116,3 +116,8 @@ def test_salud_se_registra_en_debug(caplog):
     with caplog.at_level(logging.INFO, logger="app.pedidos"):
         TestClient(app).get("/salud")
     assert not [r for r in caplog.records if r.name == "app.pedidos"]
+
+
+def test_httpx_solo_registra_advertencias_y_errores():
+    # app.main llama a configurar_logs al importarse.
+    assert logging.getLogger("httpx").getEffectiveLevel() == logging.WARNING

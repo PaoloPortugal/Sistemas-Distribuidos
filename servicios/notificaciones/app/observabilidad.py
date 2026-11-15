@@ -122,6 +122,10 @@ def configurar_logs(servicio: str, nivel: str = "INFO") -> None:
         logger = logging.getLogger(nombre)
         logger.handlers = []
         logger.propagate = True
+    # httpx escribe una línea INFO por cada pedido de los clientes internos; el
+    # middleware del servicio llamado ya registra cada pedido, así que solo se
+    # dejan sus advertencias y errores.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
 
 
 def _correlation_id_recibido(scope) -> str | None:
