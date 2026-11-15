@@ -7,6 +7,7 @@ import httpx
 import pytest
 
 from app.clientes.usuarios import ClienteUsuariosHttp, DatosUsuario, UsuariosNoDisponible
+from app.observabilidad import ENCABEZADO, con_correlation_id
 
 
 def cliente_con(respuesta_o_error) -> tuple[ClienteUsuariosHttp, list[httpx.Request]]:
@@ -77,3 +78,21 @@ def test_el_timeout_cubre_todo_el_pedido():
 def test_sin_url_configurada():
     with pytest.raises(UsuariosNoDisponible):
         ClienteUsuariosHttp("", 3.0).nombres(["ana.perez@ejemplo.com"])
+
+
+def test_reenvia_el_correlation_id():
+    # Propagación del correlation_id entre servicios (el pedido corre en otro hilo).
+    cliente, pedidos = cliente_con(httpx.Response(200, json={"usuarios": []}))
+
+    with con_correlation_id("pedido-123"):
+        cliente.nombres(["ana.perez@ejemplo.com"])
+
+    assert pedidos[0].headers[ENCABEZADO] == "pedido-123"
+
+
+def test_sin_correlation_id_no_agrega_el_encabezado():
+    cliente, pedidos = cliente_con(httpx.Response(200, json={"usuarios": []}))
+
+    cliente.nombres(["ana.perez@ejemplo.com"])
+
+    assert ENCABEZADO not in pedidos[0].headers

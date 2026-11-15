@@ -3,7 +3,8 @@
 No existe turno.modificado: modificar un turno es cancelarlo y reservar otro.
 
 Exchange `turnos` (topic, durable); routing key = tipo del evento;
-message_id = id_evento; mensajes persistentes. El canal usa publisher
+message_id = id_evento; correlation_id = el del pedido que originó el
+evento (también va en el cuerpo); mensajes persistentes. El canal usa publisher
 confirms: `publicar` vuelve solo cuando el broker confirmó, y lanza una
 excepción si lo rechazó (Nack) o si el mensaje no llegó a ninguna cola.
 """
@@ -30,6 +31,7 @@ class PublicadorRabbit:
         mensaje = aio_pika.Message(
             body=json.dumps(evento.payload, ensure_ascii=False).encode("utf-8"),
             message_id=str(evento.id_evento),
+            correlation_id=evento.payload.get("correlation_id"),
             type=evento.tipo,
             content_type="application/json",
             content_encoding="utf-8",

@@ -93,6 +93,16 @@ def crear_disponibilidad(
         if sesion.get(Profesional, email) is None:
             raise ProfesionalNoRegistrado from None
         raise
+    registro.info(
+        "Disponibilidad %d creada",
+        disponibilidad.id_disponibilidad,
+        extra={
+            "id_disponibilidad": disponibilidad.id_disponibilidad,
+            "fecha_disponibilidad": fecha.isoformat(),
+            "horario_inicio": horario_inicio.isoformat(),
+            "horario_fin": horario_fin.isoformat(),
+        },
+    )
     return disponibilidad
 
 
@@ -173,6 +183,11 @@ def eliminar_disponibilidad(
         reservas.bloquear(id_disponibilidad)
     except DisponibilidadConTurno:
         sesion.rollback()
+        registro.warning(
+            "Borrado rechazado: la disponibilidad %d tiene un turno reservado",
+            id_disponibilidad,
+            extra={"id_disponibilidad": id_disponibilidad, "motivo": "DISPONIBILIDAD_CON_TURNO"},
+        )
         raise
     except ReservasNoDisponible:
         # Pudo haberse aplicado (timeout de lectura): se compensa igual.
@@ -187,6 +202,11 @@ def eliminar_disponibilidad(
         sesion.rollback()
         _desbloquear_sin_fallar(reservas, id_disponibilidad)
         raise
+    registro.info(
+        "Disponibilidad %d eliminada",
+        id_disponibilidad,
+        extra={"id_disponibilidad": id_disponibilidad},
+    )
 
 
 def _desbloquear_sin_fallar(reservas: ClienteReservas, id_disponibilidad: int) -> None:

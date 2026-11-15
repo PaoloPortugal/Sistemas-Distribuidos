@@ -12,6 +12,7 @@ from app.clientes.catalogo import (
     EspecialidadInexistente,
     MatriculaYaRegistrada,
 )
+from app.observabilidad import ENCABEZADO, con_correlation_id
 
 ALTA = {
     "email": "dr.gomez@ejemplo.com",
@@ -113,3 +114,21 @@ def test_borrar_con_error():
 
     with pytest.raises(CatalogoNoDisponible):
         cliente.borrar_profesional("dr.gomez@ejemplo.com")
+
+
+def test_reenvia_el_correlation_id():
+    # Propagación del correlation_id entre servicios (alta y baja de profesionales).
+    cliente, pedidos = cliente_con(httpx.Response(204))
+
+    with con_correlation_id("pedido-123"):
+        cliente.borrar_profesional("dr.gomez@ejemplo.com")
+
+    assert pedidos[0].headers[ENCABEZADO] == "pedido-123"
+
+
+def test_sin_correlation_id_no_agrega_el_encabezado():
+    cliente, pedidos = cliente_con(httpx.Response(204))
+
+    cliente.borrar_profesional("dr.gomez@ejemplo.com")
+
+    assert ENCABEZADO not in pedidos[0].headers

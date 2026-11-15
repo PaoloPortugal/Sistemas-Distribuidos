@@ -3,6 +3,7 @@ ejemplo, un mensaje de RabbitMQ falso y un servidor de correo falso."""
 
 import datetime
 import json
+import logging
 import uuid
 from collections.abc import Iterator
 
@@ -13,6 +14,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.config import configuracion
 from app.db.modelos import ESQUEMA, Base
+from app.observabilidad import FormateadorJson
 
 configuracion.iniciar_procesos = False
 
@@ -65,9 +67,15 @@ def evento(tipo="turno.confirmado", **cambios) -> dict:
 class MensajeFalso:
     """Imita un mensaje de aio-pika: registra ack, nack y reject en una bitácora."""
 
-    def __init__(self, cuerpo: bytes | dict, bitacora: list[str] | None = None):
+    def __init__(
+        self,
+        cuerpo: bytes | dict,
+        bitacora: list[str] | None = None,
+        correlation_id: str | None = None,
+    ):
         self.body = json.dumps(cuerpo).encode() if isinstance(cuerpo, dict) else cuerpo
         self.message_id = "prueba"
+        self.correlation_id = correlation_id
         self.bitacora = bitacora if bitacora is not None else []
 
     async def ack(self):
@@ -91,3 +99,21 @@ class CorreoFalso:
         if para in self.fallar_para:
             raise ConnectionRefusedError("SMTP no disponible")
         self.enviados.append({"para": para, "asunto": asunto, "cuerpo": cuerpo, "id": id_mensaje})
+
+
+@pytest.fixture
+def lineas_json() -> Iterator[list[dict]]:
+    """Líneas JSON de los logs, formateadas al emitirse (con el correlation_id de ese momento)."""
+    lineas: list[dict] = []
+
+    class Capturador(logging.Handler):
+        def emit(self, registro: logging.LogRecord) -> None:
+            lineas.append(json.loads(FormateadorJson("notificaciones").format(registro)))
+
+    raiz = logging.getLogger()
+    capturador, nivel_anterior = Capturador(), raiz.level
+    raiz.addHandler(capturador)
+    raiz.setLevel(logging.INFO)
+    yield lineas
+    raiz.removeHandler(capturador)
+    raiz.setLevel(nivel_anterior)

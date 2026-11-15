@@ -73,6 +73,8 @@ def test_reservar_crea_el_turno_y_el_evento(cliente, como_ana, fabrica_sesiones)
         "fecha": "2026-11-05",
         "horario_inicio": "09:00:00",
         "horario_fin": "09:30:00",
+        # El del pedido: lo generó el middleware y se devolvió en la respuesta.
+        "correlation_id": respuesta.headers["X-Correlation-ID"],
     }
     assert eventos[0].publicado_en is None
 

@@ -7,4 +7,4 @@ COPY alembic ./alembic
 COPY app ./app
 EXPOSE 8002
 # Aplica las migraciones antes de levantar la API; si fallan, el contenedor no arranca.
-CMD ["sh", "-c", "alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port 8002"]
+CMD ["sh", "-c", "alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port 8002 --no-access-log"]

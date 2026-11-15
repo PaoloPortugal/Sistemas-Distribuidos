@@ -14,7 +14,5 @@ Factores aplicados en el proyecto y cómo.
 | VIII. Concurrencia | El trabajo se reparte en tipos de proceso: la API de Reservas atiende pedidos y el Publicador (misma imagen, otro comando) envía los eventos del outbox. Cada tipo escala por separado, y varios publicadores pueden correr a la vez porque toman eventos con `FOR UPDATE SKIP LOCKED`. |
 | IX. Desechabilidad | Los contenedores arrancan rápido y esperan a sus dependencias con healthchecks. En Usuarios, Catálogo y Reservas uvicorn corre con `exec`, para recibir las señales de parada. |
 | X. Paridad entre entornos | Todos los integrantes levantan las mismas imágenes con `docker compose`; la diferencia con producción se limita a servicios de respaldo configurables (Mailpit). |
+| XI. Logs | Los servicios no escriben archivos de log: emiten una línea JSON por evento a stdout, con el `correlation_id` del pedido, y Docker recoge esa salida. Se consultan con `docker compose logs` y se pueden enviar a un agregador sin cambiar el código ([observabilidad](08-observabilidad.md)). |
 | XII. Procesos de administración | Las migraciones de Alembic y la carga de datos iniciales corren con el mismo código e imagen que la aplicación, al arrancar el contenedor ([ADR 001](decisiones/001-migraciones-al-arrancar.md)). |
-
-<!-- Pendiente: XI (logs como flujo de eventos a stdout), cuando se
-implemente la observabilidad. -->

@@ -119,4 +119,17 @@ y el email se toma del token, no del cuerpo del pedido). El login responde el
 mismo mensaje y en un tiempo similar exista o no el email. Las claves y
 contraseñas no están en el repositorio.
 
-<!-- Pendiente de completar cuando se implemente: la observabilidad. -->
+## Observabilidad
+
+**Relevancia:** una reserva pasa por el gateway, Reservas, Catálogo, el
+outbox, RabbitMQ y Notificaciones. Cuando un paciente dice que no le llegó el
+mail, hay que poder seguir ese pedido por todos los componentes sin revisar
+cada servicio por separado.
+
+**Cómo se aborda:** cada servicio escribe logs JSON a stdout con un
+`correlation_id` por pedido, que se reenvía en las llamadas REST internas y
+viaja en el evento hasta el consumidor de Notificaciones; el envío del mail se
+asocia por `id_turno`. Se registran los eventos de negocio (turno reservado o
+cancelado, reservas rechazadas y su motivo, eventos publicados y procesados,
+mails enviados y reintentos) con ids, no con datos personales. Cada servicio
+expone `/salud` ([observabilidad](08-observabilidad.md)).

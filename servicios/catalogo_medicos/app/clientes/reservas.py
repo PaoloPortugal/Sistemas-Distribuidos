@@ -14,6 +14,7 @@ from typing import Protocol
 import httpx
 
 from app.config import configuracion
+from app.observabilidad import encabezados_correlacion
 
 _hilos = ThreadPoolExecutor(max_workers=8, thread_name_prefix="cliente-reservas")
 
@@ -72,16 +73,23 @@ class ClienteReservasHttp:
             raise ReservasNoDisponible(f"respuesta fuera del contrato: {respuesta.status_code}")
 
     def _pedir(self, metodo: str, ruta: str, **kwargs) -> httpx.Response:
-        pedido = _hilos.submit(self._pedir_sin_limite, metodo, ruta, **kwargs)
+        # El hilo no hereda las variables de contexto: el correlation_id se lee acá.
+        encabezados = encabezados_correlacion()
+        pedido = _hilos.submit(self._pedir_sin_limite, metodo, ruta, encabezados, **kwargs)
         try:
             return pedido.result(timeout=self._timeout)
         except TiempoAgotado as error:
             raise ReservasNoDisponible(f"sin respuesta en {self._timeout} s") from error
 
-    def _pedir_sin_limite(self, metodo: str, ruta: str, **kwargs) -> httpx.Response:
+    def _pedir_sin_limite(
+        self, metodo: str, ruta: str, encabezados: dict[str, str], **kwargs
+    ) -> httpx.Response:
         try:
             with httpx.Client(
-                base_url=self._url_base, timeout=self._timeout, transport=self._transporte
+                base_url=self._url_base,
+                timeout=self._timeout,
+                transport=self._transporte,
+                headers=encabezados,
             ) as cliente:
                 return cliente.request(metodo, ruta, **kwargs)
         except (httpx.HTTPError, httpx.InvalidURL) as error:

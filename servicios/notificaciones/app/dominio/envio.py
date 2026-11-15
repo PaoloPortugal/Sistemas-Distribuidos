@@ -9,9 +9,15 @@ Ventana de duplicado (ADR 008): el SMTP no participa de la transacción. Si el
 proceso se cae después de que el servidor aceptó el mail y antes del commit,
 ese mail se vuelve a mandar. No existe "exactamente una vez" con un efecto
 externo; la ventana es lo que tarda el commit.
+
+Cada resultado se registra con el id_turno (y el tipo y destinatario) de la
+notificación. El envío corre fuera del pedido que originó el turno, así que no
+tiene correlation_id: se asocia con la reserva por id_turno, que el log del
+consumidor registra junto con el correlation_id (ADR 010).
 """
 
 import datetime
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol
@@ -20,6 +26,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.modelos import ENVIADO, FALLIDO, PENDIENTE, EnvioMail, Notificacion
+
+registro = logging.getLogger(__name__)
 
 
 class ServidorCorreo(Protocol):
@@ -65,6 +73,28 @@ def _siguiente(sesion: Session, ahora: datetime.datetime) -> Notificacion | None
     return sesion.scalars(consulta).first()
 
 
+def _registrar(nivel: int, mensaje: str, notificacion: Notificacion) -> None:
+    envio = notificacion.envio
+    registro.log(
+        nivel,
+        "%s: notificación %d (%s al %s) del turno %d, intento %d",
+        mensaje,
+        notificacion.id_notificacion,
+        notificacion.tipo,
+        notificacion.destinatario,
+        notificacion.id_turno,
+        envio.intentos,
+        extra={
+            "id_notificacion": notificacion.id_notificacion,
+            "id_turno": notificacion.id_turno,
+            "tipo_notificacion": notificacion.tipo,
+            "destinatario": notificacion.destinatario,
+            "intentos": envio.intentos,
+            "ultimo_error": envio.ultimo_error,
+        },
+    )
+
+
 def enviar_pendientes(
     fabrica_sesiones: Callable[[], Session],
     correo: ServidorCorreo,
@@ -94,13 +124,16 @@ def enviar_pendientes(
                 if envio.intentos >= politica.max_intentos:
                     notificacion.estado_notificacion = FALLIDO
                     resultado.fallidos += 1
+                    _registrar(logging.ERROR, "Mail fallido, no se reintenta", notificacion)
                 else:
                     envio.proximo_intento = momento + politica.espera(envio.intentos)
                     resultado.reprogramados += 1
+                    _registrar(logging.WARNING, "Mail no enviado, se reintenta", notificacion)
             else:
                 envio.intentos += 1
                 envio.enviado_en = momento
                 notificacion.estado_notificacion = ENVIADO
                 resultado.enviados += 1
+                _registrar(logging.INFO, "Mail enviado", notificacion)
             sesion.commit()
     return resultado

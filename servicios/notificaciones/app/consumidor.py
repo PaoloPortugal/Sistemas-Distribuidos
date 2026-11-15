@@ -12,6 +12,10 @@ Cada mensaje:
 - si la base no responde → se espera a que vuelva y se reencola (nack). Cada
   reencolado cuenta para `x-delivery-limit`: un mensaje que falla siempre
   termina en la DLQ en lugar de reintentarse para siempre.
+
+Mientras se procesa un mensaje, el correlation_id del contexto es el que trae
+el evento (o, si el cuerpo no se puede leer, la propiedad correlation_id del
+mensaje AMQP), así los logs se pueden asociar con la reserva que lo originó.
 """
 
 import asyncio
@@ -27,8 +31,15 @@ from sqlalchemy.orm import Session
 
 from app.config import configuracion
 from app.db.sesion import obtener_fabrica_sesiones
-from app.dominio.eventos import TURNO_CANCELADO, TURNO_CONFIRMADO, EventoInvalido, interpretar
+from app.dominio.eventos import (
+    TURNO_CANCELADO,
+    TURNO_CONFIRMADO,
+    EventoInvalido,
+    EventoTurno,
+    interpretar,
+)
 from app.dominio.notificaciones import registrar_evento
+from app.observabilidad import con_correlation_id
 
 EXCHANGE = "turnos"
 EXCHANGE_DLX = "turnos.dlx"
@@ -61,10 +72,21 @@ async def procesar(
     try:
         evento = interpretar(mensaje.body)
     except EventoInvalido as error:
-        registro.error("Mensaje inválido %s, va a la DLQ: %s", mensaje.message_id, error)
+        with con_correlation_id(mensaje.correlation_id):
+            registro.error("Mensaje inválido %s, va a la DLQ: %s", mensaje.message_id, error)
         await mensaje.reject(requeue=False)
         return "invalido"
 
+    with con_correlation_id(evento.correlation_id or mensaje.correlation_id):
+        return await _procesar_evento(evento, mensaje, fabrica_sesiones, esperar_base)
+
+
+async def _procesar_evento(
+    evento: EventoTurno,
+    mensaje: AbstractIncomingMessage,
+    fabrica_sesiones: Callable[[], Session],
+    esperar_base: Callable[[], "asyncio.Future"] | None,
+) -> str:
     def registrar() -> bool:
         with fabrica_sesiones() as sesion:
             return registrar_evento(sesion, evento, _ahora())
@@ -79,7 +101,23 @@ async def procesar(
         return "reencolado"
 
     await mensaje.ack()  # recién después del commit
-    return "nuevo" if nuevo else "duplicado"
+    resultado = "nuevo" if nuevo else "duplicado"
+    # Lleva el correlation_id de la reserva y el id_turno: el log de cada mail
+    # enviado lleva el mismo id_turno (ADR 010).
+    registro.info(
+        "Evento %s %s del turno %d: %s",
+        evento.tipo,
+        evento.id_evento,
+        evento.id_turno,
+        resultado,
+        extra={
+            "id_evento": str(evento.id_evento),
+            "tipo_evento": evento.tipo,
+            "id_turno": evento.id_turno,
+            "resultado": resultado,
+        },
+    )
+    return resultado
 
 
 async def declarar_topologia(canal: aio_pika.abc.AbstractChannel) -> aio_pika.abc.AbstractQueue:

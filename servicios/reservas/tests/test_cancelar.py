@@ -36,7 +36,9 @@ def turno_y_eventos(fabrica_sesiones, id_turno) -> tuple[Turno, list[EventoSalie
 
 def test_paciente_cancela_su_turno(cliente, como_ana, turno_de_ana, fabrica_sesiones):
     respuesta = cliente.post(
-        f"/turnos/{turno_de_ana}/cancelar", json={"motivo": "Viaje"}, headers=como_ana
+        f"/turnos/{turno_de_ana}/cancelar",
+        json={"motivo": "Viaje"},
+        headers=como_ana | {"X-Correlation-ID": "cancelacion-123"},
     )
 
     assert respuesta.status_code == 200
@@ -63,6 +65,7 @@ def test_paciente_cancela_su_turno(cliente, como_ana, turno_de_ana, fabrica_sesi
         "horario_fin": "09:30:00",
         "cancelado_por": "PACIENTE",
         "motivo": "Viaje",
+        "correlation_id": "cancelacion-123",
     }
 
 
