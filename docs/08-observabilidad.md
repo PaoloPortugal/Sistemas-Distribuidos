@@ -21,7 +21,7 @@ se consulta con `docker compose logs`.
 | --- | --- |
 | `fecha` | Fecha y hora del evento, en UTC (ISO 8601). |
 | `nivel` | `DEBUG`, `INFO`, `WARNING` o `ERROR`. |
-| `servicio` | `usuarios`, `catalogo_medicos`, `reservas` o `notificaciones`. |
+| `servicio` | `usuarios`, `catalogo_medicos`, `reservas`, `reservas-publicador` o `notificaciones` (variable `NOMBRE_SERVICIO`). |
 | `logger` | Módulo que escribió la línea, por ejemplo `app.dominio.turnos`. |
 | `mensaje` | Texto legible del evento. |
 | `correlation_id` | Identificador del pedido que originó el evento; `null` si no hay ninguno (arranque, ciclo de envío). |
@@ -34,11 +34,18 @@ con `extra=`): ids, motivos de rechazo, duración del pedido, etc. Un ejemplo:
 {"fecha": "2026-11-02T13:00:01.204+00:00", "nivel": "INFO", "servicio": "reservas", "logger": "app.dominio.turnos", "mensaje": "Turno 15 reservado", "correlation_id": "6f1c2a9e-1b7d-4c55-9a43-0d2f8e7b5a10", "id_turno": 15, "id_disponibilidad": 7, "id_servicio": 1}
 ```
 
-También pasan por el mismo formato los logs de uvicorn. Su log de acceso
-está desactivado (`--no-access-log` en los Dockerfile) porque lo reemplaza el
-del middleware, que incluye el `correlation_id`. Los logs de `httpx`, la
-librería de los clientes REST internos, se dejan solo desde `WARNING`: cada
-llamada interna ya queda registrada por el middleware del servicio llamado.
+También pasan por el mismo formato los logs de uvicorn, los de las librerías
+(por ejemplo aio-pika) y las advertencias de Python (logger `py.warnings`).
+Las únicas líneas en texto son las de Alembic, que corre las migraciones
+antes de arrancar la aplicación.
+
+El log de acceso de uvicorn está desactivado porque lo reemplaza el del
+middleware, que incluye el `correlation_id`. No alcanza con `--no-access-log`
+(en los Dockerfile): uvicorn lo escribe igual si el logger `uvicorn.access`
+hereda el manejador del raíz, así que `configurar_logs` le corta la
+propagación. Los logs de `httpx`, la librería de los clientes REST internos,
+se dejan solo desde `WARNING`: cada llamada interna ya queda registrada por
+el middleware del servicio llamado.
 
 El nivel mínimo se elige con la variable de entorno `NIVEL_LOG` (por defecto
 `INFO`). En `INFO`, `/salud` no aparece: se registra en `DEBUG` para que los
@@ -149,12 +156,14 @@ para encontrar el registro.
    docker compose logs --no-log-prefix notificaciones | grep '"id_turno": 15,'
    ```
 
-Con `jq` se puede filtrar por campo y ordenar por fecha; `fromjson?` descarta
-las líneas que no son JSON (por ejemplo, la salida de las migraciones al
-arrancar):
+Con [`jq`](https://jqlang.org) (herramienta externa, opcional) se puede
+filtrar por campo y ordenar por fecha. Ordenar importa porque
+`docker compose logs` agrupa las líneas por servicio, no en orden
+cronológico. `fromjson?` descarta las líneas que no son JSON (la salida de
+las migraciones al arrancar):
 
 ```sh
-docker compose logs --no-log-prefix reservas reservas-publicador notificaciones \
+docker compose logs --no-log-prefix usuarios catalogo-medicos reservas reservas-publicador notificaciones \
   | jq -cR 'fromjson? | select(.correlation_id == "6f1c2a9e-1b7d-4c55-9a43-0d2f8e7b5a10")' \
   | jq -s -c 'sort_by(.fecha)[]'
 ```

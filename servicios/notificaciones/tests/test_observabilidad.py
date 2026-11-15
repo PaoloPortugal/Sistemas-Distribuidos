@@ -4,16 +4,19 @@ import json
 import logging
 import sys
 import uuid
+import warnings
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from app.config import configuracion
 from app.main import app
 from app.observabilidad import (
     ENCABEZADO,
     FormateadorJson,
     MiddlewareCorrelacion,
     con_correlation_id,
+    configurar_logs,
     encabezados_correlacion,
     obtener_correlation_id,
 )
@@ -121,3 +124,35 @@ def test_salud_se_registra_en_debug(caplog):
 def test_httpx_solo_registra_advertencias_y_errores():
     # app.main llama a configurar_logs al importarse.
     assert logging.getLogger("httpx").getEffectiveLevel() == logging.WARNING
+
+
+def test_uvicorn_no_escribe_el_log_de_acceso():
+    # uvicorn escribe el log de acceso solo si este logger tiene manejadores.
+    # Se vuelve a configurar porque pytest le agrega el suyo durante la prueba.
+    configurar_logs(configuracion.nombre_servicio, configuracion.nivel_log)
+    assert not logging.getLogger("uvicorn.access").hasHandlers()
+
+
+def test_no_incluye_el_mensaje_con_colores_de_uvicorn():
+    datos = json.loads(FormateadorJson("x").format(_registro("listo", color_message="[1mlisto")))
+    assert "color_message" not in datos
+
+
+def test_las_advertencias_de_python_salen_por_el_log():
+    lineas: list[logging.LogRecord] = []
+    capturador = logging.Handler()
+    capturador.emit = lineas.append
+    logging.getLogger().addHandler(capturador)
+    try:
+        # pytest captura las advertencias por su cuenta: se configura dentro de
+        # catch_warnings, que al salir restaura su manejo. captureWarnings no
+        # hace nada si ya estaba activo (desde que se importó app.main), por
+        # eso primero se desactiva.
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            logging.captureWarnings(False)
+            configurar_logs(configuracion.nombre_servicio, configuracion.nivel_log)
+            warnings.warn("algo obsoleto", RuntimeWarning, stacklevel=1)
+    finally:
+        logging.getLogger().removeHandler(capturador)
+    assert [r.name for r in lineas if "algo obsoleto" in r.getMessage()] == ["py.warnings"]

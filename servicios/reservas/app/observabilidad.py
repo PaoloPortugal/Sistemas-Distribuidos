@@ -62,9 +62,11 @@ def encabezados_correlacion() -> dict[str, str]:
 
 
 # Atributos propios de LogRecord: todo lo demás llegó por `extra=` y va a la línea JSON.
+# `color_message` lo agrega uvicorn: es el mismo mensaje con códigos de color.
 _ATRIBUTOS_DE_REGISTRO = set(vars(logging.LogRecord("", 0, "", 0, "", None, None))) | {
     "message",
     "asctime",
+    "color_message",
 }
 
 
@@ -116,16 +118,24 @@ def configurar_logs(servicio: str, nivel: str = "INFO") -> None:
     raiz.addHandler(manejador)
     raiz.setLevel(nivel.upper())
     # uvicorn instala sus propios manejadores de texto: se quitan para que sus
-    # mensajes pasen por el raíz y salgan en JSON. El log de acceso lo reemplaza
-    # el middleware (uvicorn corre con --no-access-log).
-    for nombre in ("uvicorn", "uvicorn.error", "uvicorn.access"):
+    # mensajes pasen por el raíz y salgan en JSON.
+    for nombre in ("uvicorn", "uvicorn.error"):
         logger = logging.getLogger(nombre)
         logger.handlers = []
         logger.propagate = True
+    # El log de acceso lo reemplaza el middleware. uvicorn lo escribe si el
+    # logger tiene algún manejador, propio o heredado del raíz, aunque corra con
+    # --no-access-log: por eso no se deja propagar.
+    acceso = logging.getLogger("uvicorn.access")
+    acceso.handlers = []
+    acceso.propagate = False
     # httpx escribe una línea INFO por cada pedido de los clientes internos; el
     # middleware del servicio llamado ya registra cada pedido, así que solo se
     # dejan sus advertencias y errores.
     logging.getLogger("httpx").setLevel(logging.WARNING)
+    # Las advertencias de Python (módulo warnings) van a stderr en texto; así
+    # pasan por el logger "py.warnings" y salen en JSON.
+    logging.captureWarnings(True)
 
 
 def _correlation_id_recibido(scope) -> str | None:
