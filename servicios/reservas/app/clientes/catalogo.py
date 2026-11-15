@@ -11,6 +11,7 @@ from typing import Protocol
 import httpx
 
 from app.config import configuracion
+from app.observabilidad import encabezados_correlacion
 
 
 class ErrorCatalogo(Exception):
@@ -59,7 +60,10 @@ class ClienteCatalogoHttp:
     def datos_para_reservar(self, id_disponibilidad: int, id_servicio: int) -> DatosReserva:
         try:
             with httpx.Client(
-                base_url=self._url_base, timeout=self._timeout, transport=self._transporte
+                base_url=self._url_base,
+                timeout=self._timeout,
+                transport=self._transporte,
+                headers=encabezados_correlacion(),
             ) as cliente:
                 respuesta = cliente.get(
                     f"/interno/disponibilidades/{id_disponibilidad}",

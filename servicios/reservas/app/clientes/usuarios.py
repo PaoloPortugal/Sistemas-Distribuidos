@@ -16,6 +16,7 @@ from typing import Protocol
 import httpx
 
 from app.config import configuracion
+from app.observabilidad import encabezados_correlacion
 
 _hilos = ThreadPoolExecutor(max_workers=8, thread_name_prefix="cliente-usuarios")
 
@@ -47,7 +48,8 @@ class ClienteUsuariosHttp:
 
     def nombres(self, emails: list[str]) -> dict[str, DatosUsuario]:
         """Por email; los que usuarios no conoce no aparecen."""
-        pedido = _hilos.submit(self._pedir, emails)
+        # El hilo no hereda las variables de contexto: el correlation_id se lee acá.
+        pedido = _hilos.submit(self._pedir, emails, encabezados_correlacion())
         try:
             respuesta = pedido.result(timeout=self._timeout)
         except TiempoAgotado as error:
@@ -62,10 +64,13 @@ class ClienteUsuariosHttp:
         except (ValueError, KeyError, TypeError) as error:
             raise UsuariosNoDisponible("respuesta 200 fuera del contrato") from error
 
-    def _pedir(self, emails: list[str]) -> httpx.Response:
+    def _pedir(self, emails: list[str], encabezados: dict[str, str]) -> httpx.Response:
         try:
             with httpx.Client(
-                base_url=self._url_base, timeout=self._timeout, transport=self._transporte
+                base_url=self._url_base,
+                timeout=self._timeout,
+                transport=self._transporte,
+                headers=encabezados,
             ) as cliente:
                 return cliente.post("/interno/usuarios/nombres", json={"emails": emails})
         except (httpx.HTTPError, httpx.InvalidURL) as error:

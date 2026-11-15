@@ -7,6 +7,7 @@ import httpx
 import pytest
 
 from app.clientes.reservas import ClienteReservasHttp, DisponibilidadConTurno, ReservasNoDisponible
+from app.observabilidad import ENCABEZADO, con_correlation_id
 
 
 def cliente_con(respuesta_o_error) -> tuple[ClienteReservasHttp, list[httpx.Request]]:
@@ -105,3 +106,21 @@ def test_el_timeout_cubre_todo_el_pedido():
 def test_sin_url_configurada():
     with pytest.raises(ReservasNoDisponible):
         ClienteReservasHttp("", 2.0).ocupadas([7])
+
+
+def test_reenvia_el_correlation_id():
+    # Propagación del correlation_id entre servicios (el pedido corre en otro hilo).
+    cliente, pedidos = cliente_con(httpx.Response(200, json={"ocupadas": [8]}))
+
+    with con_correlation_id("pedido-123"):
+        cliente.ocupadas([7, 8, 9])
+
+    assert pedidos[0].headers[ENCABEZADO] == "pedido-123"
+
+
+def test_sin_correlation_id_no_agrega_el_encabezado():
+    cliente, pedidos = cliente_con(httpx.Response(200, json={"ocupadas": [8]}))
+
+    cliente.ocupadas([7, 8, 9])
+
+    assert ENCABEZADO not in pedidos[0].headers

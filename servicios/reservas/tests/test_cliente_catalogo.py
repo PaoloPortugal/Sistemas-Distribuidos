@@ -12,6 +12,7 @@ from app.clientes.catalogo import (
     DisponibilidadInexistente,
     ServicioInexistente,
 )
+from app.observabilidad import ENCABEZADO, con_correlation_id
 
 RESPUESTA_OK = {
     "id_disponibilidad": 7,
@@ -86,3 +87,21 @@ def test_catalogo_no_disponible(respuesta_o_error):
 def test_sin_url_configurada():
     with pytest.raises(CatalogoNoDisponible):
         ClienteCatalogoHttp("", 3.0).datos_para_reservar(7, 3)
+
+
+def test_reenvia_el_correlation_id():
+    # Propagación del correlation_id entre servicios (validación de la reserva).
+    cliente, pedidos = cliente_con(httpx.Response(200, json=RESPUESTA_OK))
+
+    with con_correlation_id("pedido-123"):
+        cliente.datos_para_reservar(7, 3)
+
+    assert pedidos[0].headers[ENCABEZADO] == "pedido-123"
+
+
+def test_sin_correlation_id_no_agrega_el_encabezado():
+    cliente, pedidos = cliente_con(httpx.Response(200, json=RESPUESTA_OK))
+
+    cliente.datos_para_reservar(7, 3)
+
+    assert ENCABEZADO not in pedidos[0].headers

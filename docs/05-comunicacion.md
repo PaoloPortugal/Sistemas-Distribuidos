@@ -1,5 +1,11 @@
 # Comunicación: REST y eventos por RabbitMQ
 
+Todos los pedidos REST internos llevan el encabezado `X-Correlation-ID` con el
+identificador del pedido que los originó, para poder seguirlo en los logs de
+cada servicio (ver [observabilidad](08-observabilidad.md)). Si no llega, el
+servicio que recibe el pedido genera uno nuevo; no es parte de ningún contrato
+de respuesta.
+
 ## REST interno: usuarios → catalogo_medicos
 
 Lo usa el registro de profesionales (ver

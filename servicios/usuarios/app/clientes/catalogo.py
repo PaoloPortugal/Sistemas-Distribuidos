@@ -11,6 +11,7 @@ from urllib.parse import quote
 import httpx
 
 from app.config import configuracion
+from app.observabilidad import encabezados_correlacion
 
 
 class ErrorCatalogo(Exception):
@@ -100,7 +101,10 @@ class ClienteCatalogoHttp:
     def _enviar(self, metodo: str, ruta: str, **opciones) -> httpx.Response:
         try:
             with httpx.Client(
-                base_url=self._url_base, timeout=self._timeout, transport=self._transporte
+                base_url=self._url_base,
+                timeout=self._timeout,
+                transport=self._transporte,
+                headers=encabezados_correlacion(),
             ) as cliente:
                 return cliente.request(metodo, ruta, **opciones)
         except (httpx.ConnectError, httpx.ConnectTimeout, httpx.UnsupportedProtocol) as error:
