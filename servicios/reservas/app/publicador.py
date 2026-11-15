@@ -21,6 +21,7 @@ from app.config import configuracion
 from app.db.sesion import obtener_fabrica_sesiones
 from app.dominio.publicacion import publicar_pendientes
 from app.eventos import PublicadorRabbit, declarar_exchange
+from app.observabilidad import configurar_logs
 
 registro = logging.getLogger("app.publicador")
 
@@ -71,9 +72,7 @@ async def correr_hasta_senal() -> None:
 
 
 def main() -> None:
-    logging.basicConfig(
-        level=configuracion.nivel_log, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
-    )
+    configurar_logs(configuracion.nombre_servicio, configuracion.nivel_log)
     asyncio.run(correr_hasta_senal())
 
 

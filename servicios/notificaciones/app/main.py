@@ -19,6 +19,9 @@ from app.consumidor import EstadoProcesos, consumir
 from app.correo import servidor_configurado
 from app.db.sesion import obtener_fabrica_sesiones
 from app.dominio.envio import PoliticaReintentos, enviar_pendientes
+from app.observabilidad import MiddlewareCorrelacion, configurar_logs
+
+configurar_logs(configuracion.nombre_servicio, configuracion.nivel_log)
 
 registro = logging.getLogger("app.envio")
 
@@ -59,9 +62,6 @@ async def enviar_en_bucle() -> None:
 async def ciclo_de_vida(_app: FastAPI):
     tareas = []
     if configuracion.iniciar_procesos:
-        logging.basicConfig(
-            level=configuracion.nivel_log, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
-        )
         tareas = [asyncio.create_task(consumir(estado)), asyncio.create_task(enviar_en_bucle())]
     yield
     for tarea in tareas:
@@ -69,6 +69,7 @@ async def ciclo_de_vida(_app: FastAPI):
 
 
 app = FastAPI(title="Servicio de Notificaciones", lifespan=ciclo_de_vida)
+app.add_middleware(MiddlewareCorrelacion)
 
 
 @app.get("/salud")
